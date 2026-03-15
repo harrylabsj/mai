@@ -1,71 +1,73 @@
 ---
-name: mai
-description: Research purchases, compare prices, detect scams, and negotiate better deals. Use when the user wants to buy something, research a product, compare prices, check if a deal is legitimate, or get advice on negotiating better prices.
+name: "mai"
+description: "Research purchases, compare prices, detect scams, and negotiate better deals."
 ---
 
-# Mai (买)
+## Triggers
 
-Research purchases, compare prices, detect scams, and negotiate better deals.
+Activate on: "我要买", "值得买吗", "这个划算吗", "帮我找", "比较价格", "砍价", "怎么谈价", price research requests.
 
-## Capabilities
+**Before acting:** Clarify budget (hard limit vs flexible), timeline (urgent vs can wait), quality tolerance.
 
-1. **Product Research** - Gather detailed information about products, specifications, features, and alternatives
-2. **Price Comparison** - Compare prices across different retailers and platforms
-3. **Scam Detection** - Identify potential scams, counterfeit products, and suspicious deals
-4. **Deal Analysis** - Evaluate whether a deal is good, fair, or overpriced
-5. **Negotiation Advice** - Provide tips and strategies for negotiating better prices
-6. **Purchase Timing** - Advise on when to buy based on price trends and seasonal patterns
+## Core Flow
 
-## Usage Scenarios
+1. **Identify** — What are they buying? (product, service, B2B software)
+2. **Research** — Check sources per category (see `sources.md`)
+3. **Evaluate** — Price vs market, red flags, timing
+4. **Recommend** — Buy / wait / walk + reasoning
+5. **Support** — Negotiation scripts if needed
 
-- "我想买一台笔记本电脑，有什么建议？"
-- "帮我查一下 iPhone 16 的价格"
-- "这个网站的价格这么低，是不是骗局？"
-- "怎么跟卖家砍价？"
-- "现在买还是等等更划算？"
-- "帮我比较一下这几款产品"
-- "这个二手商品值多少钱？"
+## Quick Deal Check
 
-## Workflow
+When asked "这个划算吗？":
+- Compare to recent **sold** prices (not listings)
+- Check 3-month price trend — dropping = wait, stable = buy
+- Scan for red flags below
 
-1. **Understand Needs** - Clarify what the user wants to buy, their budget, and priorities
-2. **Research Products** - Find relevant products matching the criteria
-3. **Compare Options** - Analyze features, prices, and reviews across options
-4. **Assess Risks** - Check for potential scams or red flags
-5. **Provide Recommendations** - Give clear advice with reasoning
-6. **Negotiation Tips** - Offer strategies for getting better deals
+**Red flags that kill deals:**
+- Price far below market → scam
+- Seller avoids written communication
+- Payment via wire/crypto/gift cards only
+- "Sale" price is actually above 6-month average
 
-## Scam Detection Guidelines
+## Decision Framework
 
-Watch for these red flags:
-- Prices significantly below market rate
-- Requests for payment outside secure platforms
-- Sellers with no reviews or suspicious feedback
-- Pressure tactics or urgency claims
-- Lack of clear return/refund policies
-- Requests for personal financial information
+| Question | No = |
+|----------|------|
+| Do I need this (not just want)? | Wait 30 days |
+| Have I researched alternatives? | Research first |
+| Is price at/below market? | Negotiate |
+| Do I have a walk-away price? | Set one now |
 
-## Negotiation Strategies
+All yes → Buy.
 
-- Research market prices before negotiating
-- Use competitor prices as leverage
-- Ask about bundles or package deals
-- Time purchases around sales events
-- Be willing to walk away
-- Consider open-box or refurbished options
+## Negotiation Basics
 
-## Output Format
+**Retail/services:**
+> "I found this for $X at [competitor]. Can you match?"
 
-- **Product Summary** - Key features and specifications
-- **Price Range** - Expected price range and where to find deals
-- **Risk Assessment** - Scam risk level and red flags (if any)
-- **Recommendation** - Buy/Don't buy with reasoning
-- **Negotiation Tips** - Specific advice for getting better prices
-- **Alternatives** - Other options to consider
+**Used goods:**
+> "Similar items sold for $X. Would you take that?"
 
-## Notes
+**Bills (internet, insurance):**
+> "I've been a customer X years. What can you do to keep me?"
 
-- Focuses on publicly available information
-- Does not handle actual transactions or payments
-- Always verify seller legitimacy before purchasing
-- Prices and availability change frequently
+For advanced tactics and category-specific scripts, see `tactics.md`.
+
+## Category Guidance
+
+Different categories need different approaches — pricing data, negotiation norms, and red flags vary significantly. See `categories.md` for:
+- Electronics & tech
+- Vehicles
+- Real estate
+- Services (contractors, professionals)
+- B2B / SaaS
+- Subscriptions
+
+## Subscription Audit
+
+When asked to review subscriptions:
+1. List all with cost + last use date
+2. Flag: unused (60+ days), overpriced, redundant
+3. Provide cancellation talking points
+4. Calculate total savings
