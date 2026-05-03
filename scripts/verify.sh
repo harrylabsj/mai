@@ -9,6 +9,7 @@ python3 "$ROOT_DIR/scripts/mai.py" --help >/dev/null
 python3 "$ROOT_DIR/scripts/mai_registry.py" --help >/dev/null
 bash "$ROOT_DIR/scripts/install.sh" --both --dry-run >/dev/null
 python3 -m unittest discover -s "$ROOT_DIR/tests"
+node --test "$ROOT_DIR/tests/mai_plugin.test.mjs"
 
 python3 "$ROOT_DIR/scripts/mai.py" --data "$DATA_FILE" merchant create \
   --id seller-a \
@@ -108,7 +109,14 @@ assert "TODO" not in skill
 package = json.loads((root / "package.json").read_text(encoding="utf-8"))
 clawhub = json.loads((root / "clawhub.json").read_text(encoding="utf-8"))
 assert package["name"] == clawhub["name"] == "mai"
-assert package["version"] == clawhub["version"] == "0.1.0"
+assert package["version"] == clawhub["version"] == "1.1.0"
+plugin_package = json.loads((root / "plugins" / "mai-plugin" / "package.json").read_text(encoding="utf-8"))
+plugin = json.loads((root / "plugins" / "mai-plugin" / "openclaw.plugin.json").read_text(encoding="utf-8"))
+assert plugin_package["name"] == plugin["id"] == "mai-plugin"
+assert plugin["version"] == plugin_package["version"] == package["version"]
+assert plugin_package["openclaw"]["extensions"] == ["./index.js"]
+assert plugin_package["openclaw"]["compat"]["pluginApi"] == ">=2026.5.2"
+assert plugin_package["openclaw"]["build"]["openclawVersion"] == "2026.5.2"
 assert (root / "Dockerfile").exists()
 assert (root / "docker-compose.yml").exists()
 assert (root / "registry.example.env").exists()

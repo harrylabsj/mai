@@ -42,7 +42,7 @@ def load_mai_module():
 mai = load_mai_module()
 
 
-VERSION = "0.1.0"
+VERSION = "1.1.0"
 RISK_TERMS = {
     "fake id",
     "counterfeit",
@@ -407,7 +407,7 @@ def transition_payment(payment: Dict[str, Any], new_status: str, actor: str, not
 
 
 class RegistryHandler(BaseHTTPRequestHandler):
-    server_version = "MaiRegistry/0.1"
+    server_version = "MaiRegistry/1.1"
 
     def log_message(self, format: str, *args: Any) -> None:
         if getattr(self.server, "quiet", True):

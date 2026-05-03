@@ -1,6 +1,6 @@
 ---
 name: mai
-description: "AI shopping matchmaking agent for OpenClaw and Hermes. Use when merchants want to publish products, manage stock, answer buyer questions, and handle order requests; or when buyers want to discover merchants and products, compare prices, discuss with sellers, read reviews, and create trackable orders. Supports local-first transaction tracking with external payment references instead of custodial payments."
+description: "AI shopping matchmaking agent for OpenClaw and Hermes. Use when merchants want to publish products, manage stock, answer buyer questions, and handle order requests; or when buyers want to discover merchants and products, compare prices, discuss with sellers, read reviews, and create trackable orders. Supports local-first transaction tracking and registry-backed PSP custody records."
 ---
 
 # Mai
@@ -14,7 +14,7 @@ Mai can run local-only or registry-backed. Use local-only for one agent's privat
 ## Operating Principles
 
 - Be neutral between buyer and merchant. Explain options, prices, review signals, inventory, and tradeoffs without fabricating availability.
-- Treat payments as external in this version. Mai records payment URLs and references but does not hold funds, release escrow, or claim payment success without user-provided evidence.
+- Treat payments as external or PSP-backed. Mai never directly holds funds. Local mode records payment URLs and references; registry mode records PSP custody events and must not claim success without PSP or external evidence.
 - Confirm before irreversible steps. Ask for buyer confirmation before creating an order and merchant confirmation before reserving stock.
 - Preserve negotiation context. Record important buyer/merchant messages with `message add` before forming or updating an order.
 - Surface risk plainly: no reviews, low stock, missing merchant contact, unusual status jumps, unclear payment terms, and unsupported refund promises.
@@ -37,7 +37,16 @@ Use `--data /path/to/mai.json` for a project-local or test database.
 
 ## Installation
 
-Install into OpenClaw and Hermes:
+Install the published OpenClaw pair:
+
+```bash
+clawhub --workdir ~/.openclaw/workspace --dir skills install mai
+openclaw plugins install clawhub:mai-plugin
+```
+
+`mai` is the skill. `mai-plugin` is an optional lightweight OpenClaw native bridge for tools and `/mai` command support.
+
+Local checkout install:
 
 ```bash
 cd /Users/jianghaidong/coding/mai
@@ -178,4 +187,4 @@ Before claiming the package is ready:
 - `python3 -m unittest discover -s tests`
 - `bash scripts/verify.sh`
 - Confirm `SKILL.md` has no scaffold placeholders.
-- Confirm `README.md`, `package.json`, `clawhub.json`, and `agents/openai.yaml` use the `mai` name consistently.
+- Confirm `README.md`, `package.json`, `clawhub.json`, `plugins/mai-plugin/openclaw.plugin.json`, and `agents/openai.yaml` use the `mai` and `mai-plugin` names consistently.

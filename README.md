@@ -2,7 +2,7 @@
 
 Mai is a local-first AI shopping matchmaking agent for OpenClaw and Hermes. Merchants can publish products and manage inventory; buyers can discover merchants and products, compare prices, discuss with sellers, read reviews, and create trackable orders.
 
-Mai records transactions but does not custody funds. The first version tracks external payment URLs and references so the agent can support real workflows without pretending to be a payment processor.
+Mai records transactions but does not custody funds directly. Local mode tracks external payment URLs and references. Registry mode records PSP-backed payment holds, releases, and refunds so the agent can support escrow-like workflows without pretending to be a licensed payment processor.
 
 ## Discovery Model
 
@@ -12,6 +12,21 @@ Mai now supports two discovery modes:
 - Registry-backed: merchants push their local store to a Mai registry; buyers search the registry; buyer messages and draft orders are stored in the registry; merchants pull their inbox back into the local store.
 
 ## Install Locally
+
+After ClawHub publication, install the pair:
+
+```bash
+clawhub --workdir ~/.openclaw/workspace --dir skills install mai
+openclaw plugins install clawhub:mai-plugin
+```
+
+`mai` is the workflow skill. `mai-plugin` is the optional lightweight OpenClaw native bridge for tools and `/mai` command support.
+
+Install only the OpenClaw skill:
+
+```bash
+clawhub --workdir ~/.openclaw/workspace --dir skills install mai
+```
 
 One-command local install for both OpenClaw and Hermes:
 
