@@ -115,5 +115,5 @@ cat <<EOF
 Next:
   OpenClaw: restart OpenClaw or refresh skills, then invoke Mai as a skill/agent.
   Hermes:   run 'hermes -s mai' or start Hermes after installing the skill.
-  Verify:   cd "$ROOT_DIR" && bash scripts/verify.sh
+  Smoke:    cd "$ROOT_DIR" && python3 scripts/mai.py --help && python3 scripts/mai_registry.py --help
 EOF
