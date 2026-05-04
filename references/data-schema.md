@@ -6,10 +6,10 @@ Mai stores a JSON document at `~/.local/share/mai/mai.json` by default. Use `--d
 
 ```json
 {
-  "version": "1.1.1",
+  "version": "1.1.2",
   "sync": {
     "mode": "local-first",
-    "schema_version": "1.1.1",
+    "schema_version": "1.1.2",
     "remote_marketplace_url": "",
     "pending_events": []
   },
@@ -94,7 +94,7 @@ The registry uses the same top-level schema as local stores, plus:
 {
   "registry": {
     "service": "mai-registry",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "created_at": "ISO-8601"
   }
 }

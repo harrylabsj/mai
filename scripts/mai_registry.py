@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
-import importlib.util
 import json
 import secrets
 import sys
@@ -23,26 +22,21 @@ from urllib.parse import parse_qs, urlparse
 
 
 def load_mai_module():
-    try:
-        import mai as imported_mai
+    module_dir = str(Path(__file__).resolve().parent)
+    if module_dir not in sys.path:
+        sys.path.insert(0, module_dir)
 
-        if hasattr(imported_mai, "empty_store"):
-            return imported_mai
-    except ImportError:
-        pass
-    module_path = Path(__file__).with_name("mai.py")
-    spec = importlib.util.spec_from_file_location("mai_cli", module_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Cannot load Mai CLI module from {module_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    import mai as imported_mai
+
+    if not hasattr(imported_mai, "empty_store"):
+        raise ImportError("Imported mai module does not expose empty_store")
+    return imported_mai
 
 
 mai = load_mai_module()
 
 
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 RISK_TERMS = {
     "fake id",
     "counterfeit",

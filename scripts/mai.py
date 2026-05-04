@@ -21,7 +21,7 @@ from urllib.request import Request, urlopen
 
 
 APP_NAME = "mai"
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 HOME_DATA_PATH = Path.home() / ".local" / "share" / APP_NAME / "mai.json"
 DATA_PATH_OVERRIDE: Optional[Path] = None
 
