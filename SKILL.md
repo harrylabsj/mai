@@ -1,6 +1,15 @@
 ---
 name: mai
 description: "AI shopping matchmaking agent for OpenClaw and Hermes. Use when merchants want to publish products, manage stock, answer buyer questions, and handle order requests; or when buyers want to discover merchants and products, compare prices, discuss with sellers, read reviews, and create trackable orders. Supports local-first transaction tracking and registry-backed PSP custody records."
+version: 1.1.2
+author: Jiang Haidong
+license: MIT
+metadata:
+  author: Jiang Haidong
+  hermes:
+    tags: [shopping, marketplace, commerce, merchant, buyer, registry]
+    category: commerce
+    related_skills: []
 ---
 
 # Mai
@@ -37,6 +46,12 @@ Use `--data /path/to/mai.json` for a project-local or test database.
 
 ## Installation
 
+Install from HermesHub after the public PR is merged:
+
+```bash
+hermes skills install github:amanning3390/hermeshub/skills/mai
+```
+
 Install the published OpenClaw pair:
 
 ```bash
@@ -49,7 +64,7 @@ openclaw plugins install clawhub:mai-plugin
 Local checkout install:
 
 ```bash
-cd /Users/jianghaidong/coding/mai
+cd /path/to/mai
 bash scripts/install.sh --both
 ```
 
@@ -81,22 +96,22 @@ python3 scripts/mai_registry.py serve --data ./mai-registry.json --host 127.0.0.
 Merchant agents publish local supply:
 
 ```bash
-python3 scripts/mai.py --data ./seller.json registry push --url http://127.0.0.1:8765 --api-key seller-token
+python3 scripts/mai.py --data ./seller.json registry push --url http://localhost:8765 --api-key seller-token
 ```
 
 Buyer agents discover supply and create demand:
 
 ```bash
-python3 scripts/mai.py --data ./buyer.json registry search-products --url http://127.0.0.1:8765 --query "longjing tea" --format json
-python3 scripts/mai.py --data ./buyer.json registry message --url http://127.0.0.1:8765 --api-key buyer-token --buyer alice --merchant seller-a --sku tea-a --text "Can this ship today?"
-python3 scripts/mai.py --data ./buyer.json registry order --url http://127.0.0.1:8765 --api-key buyer-token --buyer alice --merchant seller-a --sku tea-a --quantity 2 --offer-price 86
-python3 scripts/mai.py --data ./buyer.json registry payment-hold --url http://127.0.0.1:8765 --api-key buyer-token --buyer alice --order ORD-0001
+python3 scripts/mai.py --data ./buyer.json registry search-products --url http://localhost:8765 --query "longjing tea" --format json
+python3 scripts/mai.py --data ./buyer.json registry message --url http://localhost:8765 --api-key buyer-token --buyer alice --merchant seller-a --sku tea-a --text "Can this ship today?"
+python3 scripts/mai.py --data ./buyer.json registry order --url http://localhost:8765 --api-key buyer-token --buyer alice --merchant seller-a --sku tea-a --quantity 2 --offer-price 86
+python3 scripts/mai.py --data ./buyer.json registry payment-hold --url http://localhost:8765 --api-key buyer-token --buyer alice --order ORD-0001
 ```
 
 Merchant agents pull buyer messages and draft orders:
 
 ```bash
-python3 scripts/mai.py --data ./seller.json registry pull --url http://127.0.0.1:8765 --api-key seller-token --merchant seller-a
+python3 scripts/mai.py --data ./seller.json registry pull --url http://localhost:8765 --api-key seller-token --merchant seller-a
 ```
 
 Read `references/registry-api.md` before changing registry integrations.
