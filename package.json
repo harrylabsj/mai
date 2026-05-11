@@ -1,10 +1,11 @@
 {
-  "name": "mai",
-  "version": "1.1.2",
-  "description": "Local-first AI shopping matchmaking agent for OpenClaw and Hermes.",
+  "name": "mai-cli",
+  "version": "2.0.0",
+  "description": "Standalone SQLite-backed local commerce AI consultation marketplace runtime.",
   "bin": {
-    "mai": "scripts/mai.py",
-    "mai-registry": "scripts/mai_registry.py"
+    "mai-cli": "scripts/mai.py",
+    "mai-cli-api": "scripts/mai_api.py",
+    "mai-cli-agent": "scripts/mai_agent.py"
   },
   "scripts": {
     "install:agents": "bash scripts/install.sh --both",
@@ -17,7 +18,7 @@
     "hermes",
     "skill",
     "commerce",
-    "shopping",
+    "consultation",
     "marketplace",
     "agent"
   ],

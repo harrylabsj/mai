@@ -1,205 +1,75 @@
 ---
-name: mai
-description: "AI shopping matchmaking agent for OpenClaw and Hermes. Use when merchants want to publish products, manage stock, answer buyer questions, and handle order requests; or when buyers want to discover merchants and products, compare prices, discuss with sellers, read reviews, and create trackable orders. Supports local-first transaction tracking and registry-backed PSP custody records."
-version: 1.1.2
+name: mai-cli
+description: Standalone local commerce consultation runtime. Use when merchants need to publish shop profiles, products, stock, and delivery rules, run resident merchant agents, or review flagged consultations; use when buyers need to search nearby products, ask merchant agents stock/price/delivery questions, summarize replies, or record purchase intent as conversation context only.
+version: 2.0.0
 author: Jiang Haidong
 license: MIT
 metadata:
   author: Jiang Haidong
   hermes:
-    tags: [shopping, marketplace, commerce, merchant, buyer, registry]
+    tags: [commerce, marketplace, consultation, merchant, buyer, sqlite]
     category: commerce
     related_skills: []
 ---
 
-# Mai
+# mai-cli
 
-## Overview
+## Boundary
 
-Mai helps buyers and merchants complete shopping matchmaking through an AI agent. It keeps deterministic marketplace state in `scripts/mai.py` while the host model handles natural language, negotiation, summaries, and risk explanations.
+mai-cli is a consultation network, not a transaction system. It can answer catalog, stock, price, delivery, and substitution questions from trusted merchant data. It must not create commitments, reserve stock, process payment, record payment state, handle refunds, claim escrow, dispatch couriers, or claim delivery success.
 
-Mai can run local-only or registry-backed. Use local-only for one agent's private catalog. Use registry-backed discovery when buyers and merchants are on different machines or agent profiles.
-
-## Operating Principles
-
-- Be neutral between buyer and merchant. Explain options, prices, review signals, inventory, and tradeoffs without fabricating availability.
-- Treat payments as external or PSP-backed. Mai never directly holds funds. Local mode records payment URLs and references; registry mode records PSP custody events and must not claim success without PSP or external evidence.
-- Confirm before irreversible steps. Ask for buyer confirmation before creating an order and merchant confirmation before reserving stock.
-- Preserve negotiation context. Record important buyer/merchant messages with `message add` before forming or updating an order.
-- Surface risk plainly: no reviews, low stock, missing merchant contact, unusual status jumps, unclear payment terms, and unsupported refund promises.
-- Prefer short, actionable answers: recommendation, reason, risk, next action.
+If a buyer wants to proceed, record `quote_request` or `purchase_intent` as a conversation message only.
 
 ## Quick Start
 
-Use the CLI helper for deterministic state:
-
 ```bash
-python3 scripts/mai.py merchant create --id seller-a --name "West Lake Tea" --city Hangzhou --contact "wechat:westlake" --tags "tea,gift"
-python3 scripts/mai.py product add --merchant seller-a --sku tea-a --title "Longjing Gift Box" --price 88 --stock 5 --category tea --tags "longjing,gift"
-python3 scripts/mai.py search products --query "longjing tea" --format json
-python3 scripts/mai.py compare --skus tea-a,tea-b --format json
-python3 scripts/mai.py order create --buyer alice --merchant seller-a --sku tea-a --quantity 2 --offer-price 86
+python3 scripts/mai.py --db ./mai-cli.sqlite merchant create --id seller-a --name "West Lake Tea" --city Hangzhou --service-area "West Lake" --contact "wechat:westlake" --delivery-fee 12 --delivery-eta-minutes 45 --tags "tea,gift,longjing"
+python3 scripts/mai.py --db ./mai-cli.sqlite product add --merchant seller-a --sku tea-a --title "Longjing Gift Box" --price 88 --stock 5 --category tea --tags "longjing,gift" --delivery-attributes "same-city,courier"
+python3 scripts/mai.py --db ./mai-cli.sqlite buyer ask --buyer alice --text "longjing gift delivery today" --city Hangzhou --area "West Lake" --format json
+python3 scripts/mai.py --db ./mai-cli.sqlite agent run --merchant seller-a --once --format json
+python3 scripts/mai.py --db ./mai-cli.sqlite buyer summarize --conversation CONV-0001 --format json
+python3 scripts/mai.py --db ./mai-cli.sqlite buyer intent --conversation CONV-0001 --intent purchase_intent --text "Buyer wants merchant confirmation." --format json
+python3 scripts/mai.py agent start --merchant seller-a --db ./mai-cli.sqlite --interval 3 --format json
+python3 scripts/mai.py agent status --merchant seller-a --db ./mai-cli.sqlite --format json
+python3 scripts/mai.py agent logs --merchant seller-a --tail 20 --format json
+python3 scripts/mai.py agent stop --merchant seller-a --db ./mai-cli.sqlite --format json
 ```
 
-Default data path: `~/.local/share/mai/mai.json`.
-Use `--data /path/to/mai.json` for a project-local or test database.
-
-## Installation
-
-Install from HermesHub after the public PR is merged:
-
-```bash
-hermes skills install github:amanning3390/hermeshub/skills/mai
-```
-
-Install the published OpenClaw pair:
-
-```bash
-clawhub --workdir ~/.openclaw/workspace --dir skills install mai
-openclaw plugins install clawhub:mai-plugin
-```
-
-`mai` is the skill. `mai-plugin` is an optional lightweight OpenClaw native bridge for tools and `/mai` command support.
-
-Local checkout install:
-
-```bash
-cd /path/to/mai
-bash scripts/install.sh --both
-```
-
-Install only one ecosystem:
-
-```bash
-bash scripts/install.sh --openclaw
-bash scripts/install.sh --hermes
-```
-
-The installer creates symlinks:
-
-- OpenClaw: `~/.openclaw/workspace/skills/mai`
-- Hermes: `~/.hermes/skills/commerce/mai`
-
-After installation, restart the host agent if it does not refresh skills automatically. Hermes can preload Mai with `hermes -s mai`.
-
-## Registry Discovery
-
-Run a registry marketplace:
-
-```bash
-python3 scripts/mai_registry.py issue-key --data ./mai-registry.json --token admin-token --role admin --subject ops-admin
-python3 scripts/mai_registry.py issue-key --data ./mai-registry.json --token seller-token --role merchant --subject seller-a --merchant-id seller-a
-python3 scripts/mai_registry.py issue-key --data ./mai-registry.json --token buyer-token --role buyer --subject alice --buyer-id alice
-python3 scripts/mai_registry.py serve --data ./mai-registry.json --host 127.0.0.1 --port 8765 --rate-limit-per-minute 60
-```
-
-Merchant agents publish local supply:
-
-```bash
-python3 scripts/mai.py --data ./seller.json registry push --url http://localhost:8765 --api-key seller-token
-```
-
-Buyer agents discover supply and create demand:
-
-```bash
-python3 scripts/mai.py --data ./buyer.json registry search-products --url http://localhost:8765 --query "longjing tea" --format json
-python3 scripts/mai.py --data ./buyer.json registry message --url http://localhost:8765 --api-key buyer-token --buyer alice --merchant seller-a --sku tea-a --text "Can this ship today?"
-python3 scripts/mai.py --data ./buyer.json registry order --url http://localhost:8765 --api-key buyer-token --buyer alice --merchant seller-a --sku tea-a --quantity 2 --offer-price 86
-python3 scripts/mai.py --data ./buyer.json registry payment-hold --url http://localhost:8765 --api-key buyer-token --buyer alice --order ORD-0001
-```
-
-Merchant agents pull buyer messages and draft orders:
-
-```bash
-python3 scripts/mai.py --data ./seller.json registry pull --url http://localhost:8765 --api-key seller-token --merchant seller-a
-```
-
-Read `references/registry-api.md` before changing registry integrations.
-
-## Public Marketplace Controls
-
-- Require API keys for merchant push/pull, buyer messages/orders/payment holds, moderation, and payment release/refund.
-- Store only salted API key hashes in the registry file.
-- Allow public search, but rate-limit every request by API key or client IP.
-- Treat products with high risk scores as `pending_review`; do not show them in search until an admin approves them.
-- Use `registry payment-hold` only as PSP-backed custody tracking. The bundled `demo` provider is not real money movement.
-- Require an admin key for `registry payment-release` and `registry payment-refund`.
-- Do not claim escrow, payment success, release, or refund unless the PSP adapter or external evidence confirms it.
+Default database: `~/.local/share/mai-cli/mai-cli.sqlite`.
 
 ## Merchant Workflow
 
-1. Create or identify the merchant profile:
-   `python3 scripts/mai.py merchant create --id ID --name NAME --city CITY --contact CONTACT --tags "A,B"`
-2. Publish products:
-   `python3 scripts/mai.py product add --merchant ID --sku SKU --title TITLE --price N --stock N`
-3. Adjust stock after physical changes:
-   `python3 scripts/mai.py product stock --sku SKU --merchant ID --adjust N --reason "restock or correction"`
-4. Record important buyer questions and seller replies:
-   `python3 scripts/mai.py message add --buyer BUYER --merchant ID --sku SKU --sender merchant --text "..."`
-5. Quote and confirm orders only when inventory and terms are clear:
-   `python3 scripts/mai.py order quote ...`
-   `python3 scripts/mai.py order update --order ORD-0001 --status confirmed --actor merchant`
+1. Create a merchant profile with city, service area, contact, hours, delivery fee/ETA, and automation boundaries.
+2. Use `merchant update` to edit profile, contact, hours, service area, delivery, and automation boundaries.
+3. Add products with SKU, title, price, stock, category, tags, and delivery attributes.
+4. Use `product update` or `product stock` to update catalog fields and physical inventory counts.
+5. Run `agent run --merchant ID --once` for a single polling pass, or use `agent start/status/logs/stop` for a resident daemon with pid, state, and log files.
+6. Use `merchant human-review --merchant ID --format json` for bargaining, unclear, unsupported, or risky conversations.
 
 ## Buyer Workflow
 
-1. Discover merchants:
-   `python3 scripts/mai.py search merchants --query "tea hangzhou" --format json`
-2. Search products:
-   `python3 scripts/mai.py search products --query "longjing gift" --max-price 100 --format json`
-3. Compare shortlisted SKUs:
-   `python3 scripts/mai.py compare --skus sku-a,sku-b --format json`
-4. Inspect reviews:
-   `python3 scripts/mai.py review list --merchant ID --format json`
-5. Record discussion before ordering:
-   `python3 scripts/mai.py message add --buyer BUYER --merchant ID --sku SKU --text "..."`
-6. Create a draft order after buyer confirmation:
-   `python3 scripts/mai.py order create --buyer BUYER --merchant ID --sku SKU --quantity N`
+1. Use `search merchants`, `search products`, `buyer ask`, or `buyer chat` with buyer text and optional city/area.
+2. Wait for the merchant agent to answer from trusted data.
+3. Use `buyer summarize` to show the option, missing facts, warnings, and next action.
+4. Use `buyer intent --intent quote_request|purchase_intent` or `/intent quote_request|purchase_intent ...` inside `buyer chat` only to record interest in the conversation.
 
-## Transaction Model
+## Conversation CLI
 
-Mai tracks transactions without custody:
+Use `conversation create/show/list/message/close/human-review/resolve-review` when the raw consultation lifecycle is needed without starting the API server. Use `human-review queue` for the global unresolved review queue and `agent list/show` for marketplace heartbeat inspection.
 
-`draft -> quoted -> confirmed -> payment_pending -> paid_external -> fulfilled -> completed`
+## Human Review Rules
 
-Disputes can move through:
+Mark the conversation `human_required` for private discounts, bargaining, unclear product references, binding commitments, stock reservation, order confirmation, payment evidence, refunds, disputes, or unsupported promises.
 
-`disputed -> resolved/refunded/cancelled`
+## Legacy Import
 
-Stock is reserved when an order becomes `confirmed`. Local-only payments are recorded as `payment_url` and `payment_reference`. Registry payments are PSP custody records; the agent must say the bundled `demo` provider is not real escrow or money movement.
-
-Read `references/transaction-model.md` when handling non-happy-path order, refund, dispute, or payment questions.
-Read `references/data-schema.md` when integrating Mai with a future hosted marketplace or sync service.
-
-## Output Expectations
-
-For product discovery, answer with:
-- best match and why
-- price and merchant comparison
-- availability and shipping notes
-- review/trust signals
-- risks or missing facts
-- one next action
-
-For merchant operations, answer with:
-- action completed or blocked
-- changed product/order/inventory identifier
-- current stock or status
-- next operational step
-
-For order updates, answer with:
-- previous status and new status
-- whether stock was reserved or released
-- payment evidence recorded, if any
-- what must happen next
+Use `legacy import --from-json PATH` to import merchants and products from the older Mai JSON store. Legacy transaction records are intentionally ignored.
 
 ## Verification
 
 Before claiming the package is ready:
 
 - `python3 scripts/mai.py --help`
-- `python3 scripts/mai_registry.py --help`
-- `bash scripts/install.sh --both --dry-run`
 - `python3 -m unittest discover -s tests`
+- `node --test tests/mai_plugin.test.mjs`
 - `bash scripts/verify.sh`
-- Confirm `SKILL.md` has no scaffold placeholders.
-- Confirm `README.md`, `package.json`, `clawhub.json`, `plugins/mai-plugin/openclaw.plugin.json`, and `agents/openai.yaml` use the `mai` and `mai-plugin` names consistently.

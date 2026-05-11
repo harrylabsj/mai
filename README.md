@@ -1,178 +1,119 @@
-# Mai
+# mai-cli
 
-Mai is a local-first AI shopping matchmaking agent for OpenClaw and Hermes. Merchants can publish products and manage inventory; buyers can discover merchants and products, compare prices, discuss with sellers, read reviews, and create trackable orders.
+mai-cli is a standalone, SQLite-backed AI consultation runtime for local commerce. Merchants publish shop profiles, products, stock, and delivery rules; buyers search nearby supply, open consultations, and receive deterministic merchant-agent replies.
 
-Mai records transactions but does not custody funds directly. Local mode tracks external payment URLs and references. Registry mode records PSP-backed payment holds, releases, and refunds so the agent can support escrow-like workflows without pretending to be a licensed payment processor.
+The MVP is not a transaction system. It does not create commitments, reserve stock, process payment, record payment state, custody funds, handle refunds, dispatch couriers, or claim delivery success. Buyer intent is recorded only as `quote_request` or `purchase_intent` messages in a conversation.
 
-## Discovery Model
-
-Mai now supports two discovery modes:
-
-- Local-first: one agent searches its own `mai.json`.
-- Registry-backed: merchants push their local store to a Mai registry; buyers search the registry; buyer messages and draft orders are stored in the registry; merchants pull their inbox back into the local store.
-
-## Install Locally
-
-Install from HermesHub after the public PR is merged:
+## Install and Verify
 
 ```bash
-hermes skills install github:amanning3390/hermeshub/skills/mai
-```
-
-After ClawHub publication, install the pair:
-
-```bash
-clawhub --workdir ~/.openclaw/workspace --dir skills install mai
-openclaw plugins install clawhub:mai-plugin
-```
-
-`mai` is the workflow skill. `mai-plugin` is the optional lightweight OpenClaw native bridge for tools and `/mai` command support.
-
-Install only the OpenClaw skill:
-
-```bash
-clawhub --workdir ~/.openclaw/workspace --dir skills install mai
-```
-
-One-command local install for both OpenClaw and Hermes:
-
-```bash
-cd /path/to/mai
-bash scripts/install.sh --both
-```
-
-OpenClaw only:
-
-```bash
-cd /path/to/mai
-bash scripts/install.sh --openclaw
-```
-
-Hermes only:
-
-```bash
-cd /path/to/mai
-bash scripts/install.sh --hermes
-```
-
-Hermes publish:
-
-```bash
-hermes skills publish ./mai --to github --repo <owner>/<repo>
-```
-
-Manual install paths:
-
-- OpenClaw: `~/.openclaw/workspace/skills/mai`
-- Hermes: `~/.hermes/skills/commerce/mai`
-
-After installing, restart OpenClaw/Hermes if the running session does not automatically refresh skills. In Hermes, you can explicitly preload Mai with:
-
-```bash
-hermes -s mai
-```
-
-## Verify
-
-```bash
-cd mai
 bash scripts/verify.sh
+```
+
+Optional API dependencies are declared in `pyproject.toml` for the FastAPI marketplace service:
+
+```bash
+pip install -e '.[api]'
 ```
 
 ## Quick Start
 
 ```bash
-python3 scripts/mai.py merchant create --id seller-a --name "West Lake Tea" --city Hangzhou --contact "wechat:westlake" --tags "tea,gift"
-python3 scripts/mai.py product add --merchant seller-a --sku tea-a --title "Longjing Gift Box" --price 88 --stock 5 --category tea --tags "longjing,gift"
-python3 scripts/mai.py search products --query "longjing tea" --format json
-python3 scripts/mai.py order create --buyer alice --merchant seller-a --sku tea-a --quantity 2 --offer-price 86
+python3 scripts/mai.py --db ./mai-cli.sqlite merchant create \
+  --id seller-a \
+  --name "West Lake Tea" \
+  --city Hangzhou \
+  --service-area "West Lake" \
+  --contact "wechat:westlake" \
+  --hours "09:00-21:00" \
+  --delivery-fee 12 \
+  --delivery-eta-minutes 45 \
+  --tags "tea,gift,longjing"
+
+python3 scripts/mai.py --db ./mai-cli.sqlite product add \
+  --merchant seller-a \
+  --sku tea-a \
+  --title "Longjing Gift Box" \
+  --price 88 \
+  --stock 5 \
+  --category tea \
+  --tags "longjing,gift" \
+  --delivery-attributes "same-city,courier"
+
+python3 scripts/mai.py --db ./mai-cli.sqlite merchant update --id seller-a --hours "10:00-20:00"
+python3 scripts/mai.py --db ./mai-cli.sqlite product update --merchant seller-a --sku tea-a --stock 4 --price 92
+python3 scripts/mai.py --db ./mai-cli.sqlite search merchants --query "west lake" --city Hangzhou --format json
+
+python3 scripts/mai.py --db ./mai-cli.sqlite buyer ask \
+  --buyer alice \
+  --text "longjing gift delivery today" \
+  --city Hangzhou \
+  --area "West Lake" \
+  --format json
+
+python3 scripts/mai.py --db ./mai-cli.sqlite agent run --merchant seller-a --once --format json
+python3 scripts/mai.py --db ./mai-cli.sqlite buyer summarize --conversation CONV-0001 --format json
+python3 scripts/mai.py --db ./mai-cli.sqlite buyer intent --conversation CONV-0001 --intent purchase_intent --text "Buyer wants merchant confirmation." --format json
+
+printf 'longjing gift delivery today\n/summary\n/quit\n' | \
+  python3 scripts/mai.py --db ./mai-cli.sqlite buyer chat --buyer alice --city Hangzhou --area "West Lake" --format json
 ```
 
-Default data path: `~/.local/share/mai/mai.json`.
-Use `--data ./mai-demo.json` to keep a local test database.
+Default database path: `~/.local/share/mai-cli/mai-cli.sqlite`.
 
-## Registry Marketplace
+## Conversation CLI
 
-Start a registry service:
+The raw conversation lifecycle is available without the API server:
 
 ```bash
-python3 scripts/mai_registry.py issue-key --data ./mai-registry.json --token admin-token --role admin --subject ops-admin
-python3 scripts/mai_registry.py issue-key --data ./mai-registry.json --token seller-token --role merchant --subject seller-a --merchant-id seller-a
-python3 scripts/mai_registry.py issue-key --data ./mai-registry.json --token buyer-token --role buyer --subject alice --buyer-id alice
-python3 scripts/mai_registry.py serve --data ./mai-registry.json --host 127.0.0.1 --port 8765 --rate-limit-per-minute 60
+python3 scripts/mai.py --db ./mai-cli.sqlite conversation create --buyer alice --merchant seller-a --sku tea-a --intent ask_stock --text "Is this available?" --format json
+python3 scripts/mai.py --db ./mai-cli.sqlite conversation message --conversation CONV-0001 --sender merchant_agent --intent ask_stock --text "Stock is 5." --status waiting_buyer --format json
+python3 scripts/mai.py --db ./mai-cli.sqlite conversation human-review --conversation CONV-0001 --reason low_confidence --format json
+python3 scripts/mai.py --db ./mai-cli.sqlite conversation resolve-review --conversation CONV-0001 --action reply --sender merchant --text "Human reviewed." --format json
+python3 scripts/mai.py --db ./mai-cli.sqlite conversation close --conversation CONV-0001 --sender operator --text "Closed." --format json
+python3 scripts/mai.py --db ./mai-cli.sqlite conversation list --buyer alice --status waiting_buyer --format json
+python3 scripts/mai.py --db ./mai-cli.sqlite human-review queue --format json
+python3 scripts/mai.py --db ./mai-cli.sqlite agent list --format json
+python3 scripts/mai.py --db ./mai-cli.sqlite agent show --agent mai-cli-merchant-agent:seller-a --format json
 ```
 
-Merchant agent publishes to registry:
+## Resident Agent Daemon
+
+Use `agent run --once` for a single deterministic polling pass. Use the daemon lifecycle commands when a merchant agent should keep polling in the background:
 
 ```bash
-python3 scripts/mai.py --data ./seller.json registry push --url http://localhost:8765 --api-key seller-token
+python3 scripts/mai.py agent start --merchant seller-a --db ./mai-cli.sqlite --interval 3 --format json
+python3 scripts/mai.py agent status --merchant seller-a --db ./mai-cli.sqlite --format json
+python3 scripts/mai.py agent logs --merchant seller-a --tail 20 --format json
+python3 scripts/mai.py agent stop --merchant seller-a --db ./mai-cli.sqlite --format json
 ```
 
-Buyer agent searches and contacts the merchant:
+Pid, state, and log files are written under `~/.local/state/mai-cli/` by default. Set `MAI_CLI_STATE_DIR` to use a different state directory for tests or demos.
+
+## Marketplace API
+
+Inspect routes:
 
 ```bash
-python3 scripts/mai.py --data ./buyer.json registry search-products --url http://localhost:8765 --query "longjing tea" --format json
-python3 scripts/mai.py --data ./buyer.json registry message --url http://localhost:8765 --api-key buyer-token --buyer alice --merchant seller-a --sku tea-a --text "Can this ship today?"
-python3 scripts/mai.py --data ./buyer.json registry order --url http://localhost:8765 --api-key buyer-token --buyer alice --merchant seller-a --sku tea-a --quantity 2 --offer-price 86
-python3 scripts/mai.py --data ./buyer.json registry payment-hold --url http://localhost:8765 --api-key buyer-token --buyer alice --order ORD-0001
+python3 scripts/mai.py --db ./mai-cli.sqlite api routes --format json
 ```
 
-Merchant agent pulls new demand:
+The local API covers catalog, search, conversations, message append/close, agent heartbeats, and human-review queues. In environments without FastAPI installed, `create_app()` still returns a lightweight ASGI app for local tests and demos.
+
+`POST /merchants` returns a local `merchant_token`. Product writes, merchant profile updates, merchant/merchant-agent replies, heartbeats, and human-review write actions require that token in the JSON body as `merchant_token` or as a Bearer token. Buyer search and buyer conversation creation remain tokenless for local demos.
+
+Serve the FastAPI app after installing API dependencies:
 
 ```bash
-python3 scripts/mai.py --data ./seller.json registry pull --url http://localhost:8765 --api-key seller-token --merchant seller-a
+python3 scripts/mai.py --db ./mai-cli.sqlite api serve --host 127.0.0.1 --port 8765
 ```
 
-Admin releases or refunds held payments after fulfillment or dispute review:
+## Legacy Import
+
+Existing Mai JSON catalogs can be imported:
 
 ```bash
-python3 scripts/mai.py --data ./ops.json registry payment-release --url http://localhost:8765 --api-key admin-token --payment PAY-0001
-python3 scripts/mai.py --data ./ops.json registry payment-refund --url http://localhost:8765 --api-key admin-token --payment PAY-0001
+python3 scripts/mai.py --db ./mai-cli.sqlite legacy import --from-json ./mai.json --format json
 ```
 
-## Public Marketplace Controls
-
-The registry includes the minimum controls needed before a public pilot:
-
-- API keys are stored as salted hashes.
-- Merchant keys can only push/pull their own merchant scope.
-- Buyer keys can only create buyer-scoped messages, orders, and payment holds.
-- Admin keys are required for moderation decisions and payment release/refund.
-- Public search is allowed, but every request is rate-limited by API key or client IP.
-- Risky products are hidden in `pending_review` until an admin approves them.
-- Payment custody uses a PSP-backed state machine. The bundled `demo` provider records holds, releases, and refunds for development only.
-
-For live money movement, replace the demo provider with a licensed payment service provider integration such as Stripe Connect, Adyen for Platforms, or another provider suitable for the operating jurisdiction. Mai must not directly hold customer funds.
-
-## Docker Deployment
-
-```bash
-cd mai
-docker compose --env-file registry.example.env up --build
-```
-
-Then issue initial API keys inside the container:
-
-```bash
-docker compose exec mai-registry python3 scripts/mai_registry.py issue-key --data /data/mai-registry.json --token admin-token --role admin --subject ops-admin
-docker compose exec mai-registry python3 scripts/mai_registry.py issue-key --data /data/mai-registry.json --token seller-token --role merchant --subject seller-a --merchant-id seller-a
-docker compose exec mai-registry python3 scripts/mai_registry.py issue-key --data /data/mai-registry.json --token buyer-token --role buyer --subject alice --buyer-id alice
-```
-
-For public traffic, run the container behind HTTPS and store real tokens in a secret manager rather than shell history.
-
-## Transaction Flow
-
-Happy path:
-
-```text
-draft -> quoted -> confirmed -> payment_pending -> paid_external -> fulfilled -> completed
-```
-
-Dispute path:
-
-```text
-disputed -> resolved/refunded/cancelled
-```
-
-Inventory is reserved when an order becomes `confirmed`. Mai itself does not hold funds; registry payments are PSP custody records. The bundled demo provider is not real card charging, refunding, or payment authentication.
+Only merchants and products are imported. Legacy transaction data is ignored by design.

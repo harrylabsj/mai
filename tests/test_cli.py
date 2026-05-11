@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -14,21 +15,18 @@ import mai  # noqa: E402
 
 
 class MaiCliTest(unittest.TestCase):
-    def run_cli(self, data_file, *args):
+    def run_cli(self, db_file, *args):
         output = StringIO()
         with redirect_stdout(output):
-            mai.main(["--data", str(data_file), *args])
+            mai.main(["--data", str(db_file), *args])
         return output.getvalue()
 
-    def read_store(self, data_file):
-        return json.loads(Path(data_file).read_text(encoding="utf-8"))
-
-    def test_full_shopping_match_workflow(self):
+    def test_catalog_search_and_stock_management_use_sqlite(self):
         with tempfile.TemporaryDirectory() as tmp:
-            data_file = Path(tmp) / "mai.json"
+            db_file = Path(tmp) / "mai.sqlite"
 
             self.run_cli(
-                data_file,
+                db_file,
                 "merchant",
                 "create",
                 "--id",
@@ -37,28 +35,15 @@ class MaiCliTest(unittest.TestCase):
                 "West Lake Tea",
                 "--city",
                 "Hangzhou",
-                "--contact",
-                "wechat:westlake",
-                "--tags",
-                "tea,gift,local",
+                "--service-area",
+                "West Lake",
+                "--delivery-fee",
+                "12",
+                "--delivery-eta-minutes",
+                "45",
             )
             self.run_cli(
-                data_file,
-                "merchant",
-                "create",
-                "--id",
-                "seller-b",
-                "--name",
-                "City Tea Market",
-                "--city",
-                "Shanghai",
-                "--contact",
-                "phone:10086",
-                "--tags",
-                "tea,wholesale",
-            )
-            self.run_cli(
-                data_file,
+                db_file,
                 "product",
                 "add",
                 "--merchant",
@@ -71,275 +56,103 @@ class MaiCliTest(unittest.TestCase):
                 "88",
                 "--stock",
                 "5",
-                "--category",
-                "tea",
                 "--tags",
                 "longjing,gift",
-                "--description",
-                "Fresh spring tea gift box",
-                "--shipping",
-                "same-city courier",
+            )
+            search = json.loads(
+                self.run_cli(db_file, "search", "products", "--query", "longjing", "--format", "json")
+            )
+            self.assertEqual(search["results"][0]["sku"], "tea-a")
+            self.assertEqual(search["results"][0]["delivery"]["eta_minutes"], 45)
+
+            merchants = json.loads(
+                self.run_cli(db_file, "search", "merchants", "--query", "west lake", "--city", "Hangzhou", "--format", "json")
+            )
+            self.assertEqual(merchants["results"][0]["id"], "seller-a")
+
+            self.run_cli(db_file, "product", "stock", "--sku", "tea-a", "--stock", "3")
+            updated = json.loads(
+                self.run_cli(db_file, "search", "products", "--query", "longjing", "--format", "json")
+            )
+            self.assertEqual(updated["results"][0]["stock"], 3)
+
+            conn = sqlite3.connect(db_file)
+            try:
+                tables = {row[0] for row in conn.execute("select name from sqlite_master where type = 'table'")}
+            finally:
+                conn.close()
+            self.assertIn("merchants", tables)
+            self.assertIn("products", tables)
+            self.assertIn("delivery_rules", tables)
+            self.assertNotIn("orders", tables)
+
+    def test_merchant_and_product_update_commands(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_file = Path(tmp) / "mai.sqlite"
+            self.run_cli(db_file, "merchant", "create", "--id", "seller-a", "--name", "West Lake Tea")
+            self.run_cli(
+                db_file,
+                "merchant",
+                "update",
+                "--id",
+                "seller-a",
+                "--city",
+                "Hangzhou",
+                "--service-area",
+                "West Lake",
+                "--contact",
+                "wechat:new",
+                "--hours",
+                "10:00-20:00",
+                "--automation-boundaries",
+                "Catalog and delivery only.",
+                "--delivery-fee",
+                "10",
+                "--delivery-eta-minutes",
+                "30",
             )
             self.run_cli(
-                data_file,
+                db_file,
                 "product",
                 "add",
-                "--merchant",
-                "seller-b",
-                "--sku",
-                "tea-b",
-                "--title",
-                "Longjing Family Pack",
-                "--price",
-                "96",
-                "--stock",
-                "8",
-                "--category",
-                "tea",
-                "--tags",
-                "longjing,value",
-                "--shipping",
-                "express",
-            )
-            self.run_cli(
-                data_file,
-                "review",
-                "add",
-                "--buyer",
-                "alice",
                 "--merchant",
                 "seller-a",
                 "--sku",
                 "tea-a",
-                "--rating",
+                "--title",
+                "Longjing Gift Box",
+                "--price",
+                "88",
+                "--stock",
                 "5",
-                "--comment",
-                "Packaging was clean and delivery was fast.",
+                "--tags",
+                "longjing",
+            )
+            self.run_cli(
+                db_file,
+                "product",
+                "update",
+                "--merchant",
+                "seller-a",
+                "--sku",
+                "tea-a",
+                "--price",
+                "92",
+                "--stock",
+                "4",
+                "--delivery-attributes",
+                "same-city",
             )
 
             search = json.loads(
-                self.run_cli(
-                    data_file,
-                    "search",
-                    "products",
-                    "--query",
-                    "longjing tea",
-                    "--max-price",
-                    "100",
-                    "--format",
-                    "json",
-                )
+                self.run_cli(db_file, "search", "products", "--query", "longjing", "--format", "json")
             )
-            self.assertEqual([item["sku"] for item in search["results"]], ["tea-a", "tea-b"])
-            self.assertEqual(search["results"][0]["merchant"]["id"], "seller-a")
-            self.assertIn("in stock", search["results"][0]["reasons"])
+            product = search["results"][0]
+            self.assertEqual(product["price"], 92.0)
+            self.assertEqual(product["stock"], 4)
+            self.assertEqual(product["merchant"]["contact"], "wechat:new")
+            self.assertEqual(product["merchant"]["delivery"]["eta_minutes"], 30)
 
-            comparison = json.loads(
-                self.run_cli(data_file, "compare", "--skus", "tea-a,tea-b", "--format", "json")
-            )
-            self.assertEqual(comparison["best_value"]["sku"], "tea-a")
-            self.assertEqual(comparison["items"][0]["price"], 88.0)
-            self.assertEqual(comparison["items"][1]["price_delta"], 8.0)
 
-            self.run_cli(
-                data_file,
-                "message",
-                "add",
-                "--buyer",
-                "alice",
-                "--merchant",
-                "seller-a",
-                "--sku",
-                "tea-a",
-                "--text",
-                "Can you ship this today?",
-            )
-            order_output = self.run_cli(
-                data_file,
-                "order",
-                "create",
-                "--buyer",
-                "alice",
-                "--merchant",
-                "seller-a",
-                "--sku",
-                "tea-a",
-                "--quantity",
-                "2",
-                "--offer-price",
-                "86",
-                "--note",
-                "Gift order for tomorrow",
-            )
-            self.assertIn("Order created: ORD-0001", order_output)
-            self.run_cli(
-                data_file,
-                "order",
-                "quote",
-                "--merchant",
-                "seller-a",
-                "--order",
-                "ORD-0001",
-                "--unit-price",
-                "86",
-                "--payment-url",
-                "https://pay.example/orders/ORD-0001",
-                "--terms",
-                "External payment; seller ships after payment reference is recorded.",
-            )
-            self.run_cli(
-                data_file,
-                "order",
-                "update",
-                "--order",
-                "ORD-0001",
-                "--status",
-                "confirmed",
-                "--actor",
-                "merchant",
-                "--note",
-                "Stock reserved.",
-            )
-            self.run_cli(
-                data_file,
-                "order",
-                "update",
-                "--order",
-                "ORD-0001",
-                "--status",
-                "paid_external",
-                "--actor",
-                "buyer",
-                "--payment-reference",
-                "wx-20260503-1",
-            )
-            self.run_cli(
-                data_file,
-                "order",
-                "update",
-                "--order",
-                "ORD-0001",
-                "--status",
-                "fulfilled",
-                "--actor",
-                "merchant",
-                "--tracking",
-                "SF123",
-            )
-            self.run_cli(
-                data_file,
-                "order",
-                "update",
-                "--order",
-                "ORD-0001",
-                "--status",
-                "completed",
-                "--actor",
-                "buyer",
-            )
-
-            store = self.read_store(data_file)
-            self.assertEqual(store["products"]["tea-a"]["stock"], 3)
-            self.assertEqual(store["orders"]["ORD-0001"]["status"], "completed")
-            self.assertEqual(store["orders"]["ORD-0001"]["payment_reference"], "wx-20260503-1")
-            self.assertEqual(store["orders"]["ORD-0001"]["tracking"], "SF123")
-            self.assertEqual(len(store["messages"]), 1)
-            self.assertEqual(store["reviews"][0]["rating"], 5)
-            self.assertEqual(store["sync"]["mode"], "local-first")
-
-    def test_order_confirmation_rejects_insufficient_stock(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            data_file = Path(tmp) / "mai.json"
-            self.run_cli(data_file, "merchant", "create", "--id", "seller", "--name", "Tiny Shop")
-            self.run_cli(
-                data_file,
-                "product",
-                "add",
-                "--merchant",
-                "seller",
-                "--sku",
-                "one-item",
-                "--title",
-                "Single Item",
-                "--price",
-                "10",
-                "--stock",
-                "1",
-            )
-            self.run_cli(
-                data_file,
-                "order",
-                "create",
-                "--buyer",
-                "bob",
-                "--merchant",
-                "seller",
-                "--sku",
-                "one-item",
-                "--quantity",
-                "2",
-            )
-
-            with self.assertRaises(SystemExit):
-                self.run_cli(
-                    data_file,
-                    "order",
-                    "update",
-                    "--order",
-                    "ORD-0001",
-                    "--status",
-                    "confirmed",
-                    "--actor",
-                    "merchant",
-                )
-
-            store = self.read_store(data_file)
-            self.assertEqual(store["products"]["one-item"]["stock"], 1)
-            self.assertEqual(store["orders"]["ORD-0001"]["status"], "draft")
-
-    def test_invalid_order_transition_is_rejected(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            data_file = Path(tmp) / "mai.json"
-            self.run_cli(data_file, "merchant", "create", "--id", "seller", "--name", "Tiny Shop")
-            self.run_cli(
-                data_file,
-                "product",
-                "add",
-                "--merchant",
-                "seller",
-                "--sku",
-                "item",
-                "--title",
-                "Item",
-                "--price",
-                "10",
-                "--stock",
-                "3",
-            )
-            self.run_cli(
-                data_file,
-                "order",
-                "create",
-                "--buyer",
-                "bob",
-                "--merchant",
-                "seller",
-                "--sku",
-                "item",
-                "--quantity",
-                "1",
-            )
-
-            with self.assertRaises(SystemExit):
-                self.run_cli(
-                    data_file,
-                    "order",
-                    "update",
-                    "--order",
-                    "ORD-0001",
-                    "--status",
-                    "completed",
-                    "--actor",
-                    "buyer",
-                )
-
+if __name__ == "__main__":
+    unittest.main()

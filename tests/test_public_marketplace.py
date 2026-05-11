@@ -1,332 +1,366 @@
+import asyncio
 import json
-import sys
+import sqlite3
 import tempfile
-import threading
-import time
 import unittest
-import urllib.error
-import urllib.request
-from contextlib import redirect_stdout
-from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
-
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
-
-import mai  # noqa: E402
-import mai_registry  # noqa: E402
+from mai_cli.api.app import _list_agents
+from mai_cli.api.app import create_app
+from mai_cli.db.session import db_session
 
 
 class PublicMarketplaceTest(unittest.TestCase):
-    def run_cli(self, data_file, *args):
-        output = StringIO()
-        with redirect_stdout(output):
-            mai.main(["--data", str(data_file), *args])
-        return output.getvalue()
+    async def asgi_request(self, app, method, path, payload=None, query_string=""):
+        body = json.dumps(payload or {}).encode("utf-8") if payload is not None else b""
+        received = False
+        sent = []
 
-    def start_registry(self, registry_file, rate_limit_per_minute=60):
-        mai_registry.issue_api_key(
-            registry_file,
-            token="admin-token",
-            role="admin",
-            subject="ops-admin",
-        )
-        mai_registry.issue_api_key(
-            registry_file,
-            token="seller-token",
-            role="merchant",
-            subject="seller-a",
-            merchant_id="seller-a",
-        )
-        mai_registry.issue_api_key(
-            registry_file,
-            token="buyer-token",
-            role="buyer",
-            subject="alice",
-            buyer_id="alice",
-        )
-        server = mai_registry.create_server(
-            registry_file,
-            host="127.0.0.1",
-            port=0,
-            rate_limit_per_minute=rate_limit_per_minute,
-        )
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        self.addCleanup(server.shutdown)
-        self.addCleanup(server.server_close)
-        host, port = server.server_address
-        base_url = f"http://{host}:{port}"
+        async def receive():
+            nonlocal received
+            if received:
+                return {"type": "http.disconnect"}
+            received = True
+            return {"type": "http.request", "body": body, "more_body": False}
 
-        for _ in range(20):
+        async def send(message):
+            sent.append(message)
+
+        await app(
+            {
+                "type": "http",
+                "method": method,
+                "path": path,
+                "query_string": query_string.encode("utf-8"),
+                "headers": [(b"content-type", b"application/json")],
+            },
+            receive,
+            send,
+        )
+        status = next(message["status"] for message in sent if message["type"] == "http.response.start")
+        response_body = b"".join(message.get("body", b"") for message in sent if message["type"] == "http.response.body")
+        return status, json.loads(response_body.decode("utf-8") or "{}")
+
+    def request(self, app, method, path, payload=None, query_string=""):
+        return asyncio.run(self.asgi_request(app, method, path, payload=payload, query_string=query_string))
+
+    def test_api_factory_exposes_consultation_routes_and_initializes_sqlite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_file = Path(tmp) / "marketplace.sqlite"
+            app = create_app(db_file)
+            route_paths = {route.path for route in getattr(app, "routes", []) if hasattr(route, "path")}
+            self.assertIn("/health", route_paths)
+            self.assertIn("/merchants", route_paths)
+            self.assertIn("/merchants/{merchant_id}", route_paths)
+            self.assertIn("/products", route_paths)
+            self.assertIn("/products/{sku}", route_paths)
+            self.assertIn("/search/products", route_paths)
+            self.assertIn("/search/merchants", route_paths)
+            self.assertIn("/buyer/ask", route_paths)
+            self.assertIn("/conversations", route_paths)
+            self.assertIn("/conversations/{conversation_id}", route_paths)
+            self.assertIn("/conversations/{conversation_id}/messages", route_paths)
+            self.assertIn("/conversations/{conversation_id}/close", route_paths)
+            self.assertIn("/buyers/{buyer_id}/conversations", route_paths)
+            self.assertIn("/agents/heartbeat", route_paths)
+            self.assertIn("/agents", route_paths)
+            self.assertIn("/agents/{agent_id}", route_paths)
+            self.assertIn("/merchants/{merchant_id}/agents", route_paths)
+            self.assertIn("/human-review/queue", route_paths)
+            self.assertIn("/merchants/{merchant_id}/conversations", route_paths)
+            self.assertIn("/merchants/{merchant_id}/human-review", route_paths)
+            self.assertIn("/conversations/{conversation_id}/human-review", route_paths)
+            self.assertIn("/conversations/{conversation_id}/human-review/resolve", route_paths)
+
+            with db_session(db_file):
+                pass
+            conn = sqlite3.connect(db_file)
             try:
-                with urllib.request.urlopen(f"{base_url}/health", timeout=1) as response:
-                    payload = json.loads(response.read().decode("utf-8"))
-                if payload["ok"]:
-                    return base_url
-            except OSError:
-                time.sleep(0.05)
-        self.fail("registry did not become ready")
+                tables = {row[0] for row in conn.execute("select name from sqlite_master where type = 'table'")}
+            finally:
+                conn.close()
+            self.assertIn("conversations", tables)
+            self.assertIn("messages", tables)
+            self.assertIn("agents", tables)
+            self.assertIn("moderation_flags", tables)
+            self.assertNotIn("payments", tables)
 
-    def request_json(self, base_url, method, path, token=None, payload=None):
-        headers = {"Accept": "application/json"}
-        data = None
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-        if payload is not None:
-            headers["Content-Type"] = "application/json"
-            data = json.dumps(payload).encode("utf-8")
-        request = urllib.request.Request(base_url + path, method=method, headers=headers, data=data)
-        with urllib.request.urlopen(request, timeout=2) as response:
-            return json.loads(response.read().decode("utf-8"))
-
-    def make_seller_catalog(self, seller_file, sku="tea-a", title="Longjing Gift Box", tags="longjing,gift"):
-        self.run_cli(
-            seller_file,
-            "merchant",
-            "create",
-            "--id",
-            "seller-a",
-            "--name",
-            "West Lake Tea",
-            "--city",
-            "Hangzhou",
-            "--contact",
-            "wechat:westlake",
-            "--tags",
-            "tea,gift,local",
-        )
-        self.run_cli(
-            seller_file,
-            "product",
-            "add",
-            "--merchant",
-            "seller-a",
-            "--sku",
-            sku,
-            "--title",
-            title,
-            "--price",
-            "88",
-            "--stock",
-            "5",
-            "--category",
-            "tea",
-            "--tags",
-            tags,
-        )
-
-    def test_authentication_authorization_moderation_and_payment_custody(self):
+    def test_fallback_asgi_api_runs_marketplace_consultation_flow_with_sqlite(self):
         with tempfile.TemporaryDirectory() as tmp:
-            registry_file = Path(tmp) / "registry.json"
-            seller_file = Path(tmp) / "seller.json"
-            buyer_file = Path(tmp) / "buyer.json"
-            base_url = self.start_registry(registry_file)
-            self.make_seller_catalog(seller_file)
+            db_file = Path(tmp) / "marketplace.sqlite"
+            app = create_app(db_file)
 
-            with self.assertRaises(SystemExit):
-                self.run_cli(seller_file, "registry", "push", "--url", base_url)
-
-            self.run_cli(
-                seller_file,
-                "registry",
-                "push",
-                "--url",
-                base_url,
-                "--api-key",
-                "seller-token",
-            )
-
-            with self.assertRaises(SystemExit):
-                self.run_cli(
-                    buyer_file,
-                    "registry",
-                    "message",
-                    "--url",
-                    base_url,
-                    "--buyer",
-                    "alice",
-                    "--merchant",
-                    "seller-a",
-                    "--text",
-                    "Can this ship today?",
-                )
-
-            message = json.loads(
-                self.run_cli(
-                    buyer_file,
-                    "registry",
-                    "message",
-                    "--url",
-                    base_url,
-                    "--api-key",
-                    "buyer-token",
-                    "--buyer",
-                    "alice",
-                    "--merchant",
-                    "seller-a",
-                    "--sku",
-                    "tea-a",
-                    "--text",
-                    "Can this ship today?",
-                    "--format",
-                    "json",
-                )
-            )
-            self.assertEqual(message["message"]["buyer_id"], "alice")
-
-            order = json.loads(
-                self.run_cli(
-                    buyer_file,
-                    "registry",
-                    "order",
-                    "--url",
-                    base_url,
-                    "--api-key",
-                    "buyer-token",
-                    "--buyer",
-                    "alice",
-                    "--merchant",
-                    "seller-a",
-                    "--sku",
-                    "tea-a",
-                    "--quantity",
-                    "2",
-                    "--format",
-                    "json",
-                )
-            )
-            self.assertEqual(order["order"]["id"], "ORD-0001")
-
-            payment = json.loads(
-                self.run_cli(
-                    buyer_file,
-                    "registry",
-                    "payment-hold",
-                    "--url",
-                    base_url,
-                    "--api-key",
-                    "buyer-token",
-                    "--buyer",
-                    "alice",
-                    "--order",
-                    "ORD-0001",
-                    "--format",
-                    "json",
-                )
-            )
-            self.assertEqual(payment["payment"]["status"], "held_by_psp")
-            self.assertEqual(payment["payment"]["provider"], "demo")
-
-            with self.assertRaises(SystemExit):
-                self.run_cli(
-                    buyer_file,
-                    "registry",
-                    "payment-release",
-                    "--url",
-                    base_url,
-                    "--api-key",
-                    "buyer-token",
-                    "--payment",
-                    payment["payment"]["id"],
-                )
-
-            released = json.loads(
-                self.run_cli(
-                    buyer_file,
-                    "registry",
-                    "payment-release",
-                    "--url",
-                    base_url,
-                    "--api-key",
-                    "admin-token",
-                    "--payment",
-                    payment["payment"]["id"],
-                    "--format",
-                    "json",
-                )
-            )
-            self.assertEqual(released["payment"]["status"], "released_to_seller")
-
-            registry_store = json.loads(registry_file.read_text(encoding="utf-8"))
-            self.assertEqual(registry_store["payments"]["PAY-0001"]["status"], "released_to_seller")
-            self.assertNotIn("buyer-token", registry_file.read_text(encoding="utf-8"))
-
-    def test_rate_limit_and_moderation_queue(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            registry_file = Path(tmp) / "registry.json"
-            seller_file = Path(tmp) / "seller.json"
-            base_url = self.start_registry(registry_file, rate_limit_per_minute=3)
-            self.make_seller_catalog(
-                seller_file,
-                sku="bad-a",
-                title="Fake ID Kit",
-                tags="fake id,document",
-            )
-
-            self.run_cli(
-                seller_file,
-                "registry",
-                "push",
-                "--url",
-                base_url,
-                "--api-key",
-                "seller-token",
-            )
-
-            clean_search = json.loads(
-                self.run_cli(
-                    seller_file,
-                    "registry",
-                    "search-products",
-                    "--url",
-                    base_url,
-                    "--query",
-                    "fake id",
-                    "--format",
-                    "json",
-                )
-            )
-            self.assertEqual(clean_search["results"], [])
-
-            queue = self.request_json(base_url, "GET", "/moderation/queue", token="admin-token")
-            self.assertEqual(queue["products"][0]["sku"], "bad-a")
-            self.assertEqual(queue["products"][0]["moderation_status"], "pending_review")
-
-            approved = self.request_json(
-                base_url,
+            status, merchant = self.request(
+                app,
                 "POST",
-                "/moderation/products/bad-a",
-                token="admin-token",
-                payload={"action": "approve", "note": "Allowed in test fixture."},
+                "/merchants",
+                {
+                    "id": "seller-a",
+                    "name": "West Lake Tea",
+                    "city": "Hangzhou",
+                    "service_area": "West Lake",
+                    "contact": "wechat:westlake",
+                    "delivery_eta_minutes": 45,
+                    "tags": ["tea", "gift"],
+                },
             )
-            self.assertEqual(approved["product"]["moderation_status"], "approved")
+            self.assertEqual(status, 200)
+            self.assertEqual(merchant["merchant"]["id"], "seller-a")
+            merchant_token = merchant["merchant_token"]
 
-            visible_search = json.loads(
-                self.run_cli(
-                    seller_file,
-                    "registry",
-                    "search-products",
-                    "--url",
-                    base_url,
-                    "--query",
-                    "fake id",
-                    "--format",
-                    "json",
+            status, product = self.request(
+                app,
+                "POST",
+                "/products",
+                {
+                    "merchant_id": "seller-a",
+                    "sku": "tea-a",
+                    "title": "Longjing Gift Box",
+                    "price": 88,
+                    "stock": 5,
+                    "tags": ["longjing", "gift"],
+                    "merchant_token": merchant_token,
+                },
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(product["product"]["sku"], "tea-a")
+
+            status, merchants = self.request(app, "GET", "/search/merchants", query_string="query=west&city=Hangzhou")
+            self.assertEqual(status, 200)
+            self.assertEqual(merchants["results"][0]["id"], "seller-a")
+
+            status, ask = self.request(
+                app,
+                "POST",
+                "/buyer/ask",
+                {"buyer_id": "alice", "text": "longjing gift delivery today", "city": "Hangzhou"},
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(ask["conversation"]["id"], "CONV-0001")
+
+            status, heartbeat = self.request(
+                app,
+                "POST",
+                "/agents/heartbeat",
+                {"merchant_id": "seller-a", "status": "online"},
+            )
+            self.assertEqual(status, 403)
+            status, heartbeat = self.request(
+                app,
+                "POST",
+                "/agents/heartbeat",
+                {"merchant_id": "seller-a", "status": "online", "merchant_token": merchant_token},
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(heartbeat["agent"]["status"], "online")
+
+            status, conversation = self.request(app, "GET", "/conversations/CONV-0001")
+            self.assertEqual(status, 200)
+            self.assertEqual(conversation["conversation"]["status"], "waiting_merchant")
+
+            status, message = self.request(
+                app,
+                "POST",
+                "/conversations/CONV-0001/messages",
+                {
+                    "sender": "merchant_agent",
+                    "intent": "ask_delivery",
+                    "text": "Stock is 5 and delivery ETA is 45 minutes.",
+                    "status": "waiting_buyer",
+                },
+            )
+            self.assertEqual(status, 403)
+            status, message = self.request(
+                app,
+                "POST",
+                "/conversations/CONV-0001/messages",
+                {
+                    "sender": "merchant_agent",
+                    "intent": "ask_delivery",
+                    "text": "Stock is 5 and delivery ETA is 45 minutes.",
+                    "status": "waiting_buyer",
+                    "merchant_token": merchant_token,
+                },
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(message["message"]["sender"], "merchant_agent")
+
+            status, conversations = self.request(
+                app,
+                "GET",
+                "/merchants/seller-a/conversations",
+                query_string="status=waiting_buyer",
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(conversations["conversations"][0]["id"], "CONV-0001")
+
+            status, update = self.request(app, "PATCH", "/products/tea-a", {"merchant_id": "seller-a", "stock": 4})
+            self.assertEqual(status, 403)
+            status, update = self.request(
+                app,
+                "PATCH",
+                "/products/tea-a",
+                {"merchant_id": "seller-a", "stock": 4, "merchant_token": merchant_token},
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(update["product"]["stock"], 4)
+
+    def test_api_exposes_conversation_agent_and_human_review_lifecycle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_file = Path(tmp) / "marketplace.sqlite"
+            app = create_app(db_file)
+            _, merchant = self.request(app, "POST", "/merchants", {"id": "seller-a", "name": "West Lake Tea"})
+            merchant_token = merchant["merchant_token"]
+            self.request(
+                app,
+                "POST",
+                "/products",
+                {
+                    "merchant_id": "seller-a",
+                    "sku": "tea-a",
+                    "title": "Longjing",
+                    "price": 88,
+                    "stock": 5,
+                    "merchant_token": merchant_token,
+                },
+            )
+
+            status, created = self.request(
+                app,
+                "POST",
+                "/conversations",
+                {
+                    "buyer_id": "alice",
+                    "merchant_id": "seller-a",
+                    "sku": "tea-a",
+                    "intent": "ask_stock",
+                    "text": "Is this in stock?",
+                    "source_id": "buyer-cli-test",
+                },
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(created["conversation"]["status"], "waiting_merchant")
+            self.assertEqual(created["conversation"]["messages"][0]["structured_payload"]["source_id"], "buyer-cli-test")
+
+            status, buyer_conversations = self.request(
+                app,
+                "GET",
+                "/buyers/alice/conversations",
+                query_string="status=waiting_merchant&sku=tea-a",
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(buyer_conversations["conversations"][0]["id"], "CONV-0001")
+
+            status, agent = self.request(
+                app,
+                "POST",
+                "/agents/heartbeat",
+                {
+                    "merchant_id": "seller-a",
+                    "status": "online",
+                    "pid": 1234,
+                    "version": "2.0.0",
+                    "checked_count": 2,
+                    "replied_count": 1,
+                    "last_error": "",
+                    "merchant_token": merchant_token,
+                },
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(agent["agent"]["checked_count"], 2)
+            agent_id = agent["agent"]["id"]
+
+            status, agent_list = self.request(app, "GET", "/agents")
+            self.assertEqual(status, 200)
+            self.assertEqual(agent_list["agents"][0]["id"], agent_id)
+
+            status, agent_detail = self.request(app, "GET", f"/agents/{agent_id}")
+            self.assertEqual(status, 200)
+            self.assertEqual(agent_detail["agent"]["replied_count"], 1)
+
+            status, merchant_agents = self.request(app, "GET", "/merchants/seller-a/agents")
+            self.assertEqual(status, 200)
+            self.assertEqual(merchant_agents["agents"][0]["id"], agent_id)
+
+            conn = sqlite3.connect(db_file)
+            try:
+                conn.execute("update agents set last_seen_at = '2000-01-01T00:00:00' where id = ?", (agent_id,))
+                conn.commit()
+            finally:
+                conn.close()
+            status, stale_agent = self.request(app, "GET", f"/agents/{agent_id}")
+            self.assertEqual(status, 200)
+            self.assertTrue(stale_agent["agent"]["stale"])
+
+            status, review = self.request(
+                app,
+                "POST",
+                "/conversations/CONV-0001/human-review",
+                {
+                    "reason": "unclear_delivery",
+                    "severity": "review",
+                    "source_id": "agent-test",
+                    "merchant_token": merchant_token,
+                },
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(review["conversation"]["status"], "human_required")
+            self.assertEqual(review["review"]["reason"], "unclear_delivery")
+            self.assertIsNone(review["review"]["resolved_at"])
+
+            status, queue = self.request(app, "GET", "/human-review/queue")
+            self.assertEqual(status, 200)
+            self.assertEqual(queue["reviews"][0]["conversation_id"], "CONV-0001")
+            self.assertEqual(queue["reviews"][0]["merchant_id"], "seller-a")
+            self.assertEqual(queue["reviews"][0]["buyer_id"], "alice")
+
+            status, resolved = self.request(
+                app,
+                "POST",
+                "/conversations/CONV-0001/human-review/resolve",
+                {
+                    "action": "reply",
+                    "text": "Human confirmed delivery details.",
+                    "sender": "merchant",
+                    "merchant_token": merchant_token,
+                },
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(resolved["conversation"]["status"], "waiting_buyer")
+            self.assertIsNotNone(resolved["reviews"][0]["resolved_at"])
+
+            status, closed = self.request(
+                app,
+                "POST",
+                "/conversations/CONV-0001/close",
+                {"sender": "operator", "text": "Closed after confirmation."},
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(closed["conversation"]["status"], "closed")
+
+    def test_agent_stale_ttl_is_configurable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_file = Path(tmp) / "marketplace.sqlite"
+            app = create_app(db_file)
+            _, merchant = self.request(app, "POST", "/merchants", {"id": "seller-a", "name": "West Lake Tea"})
+            merchant_token = merchant["merchant_token"]
+            self.request(
+                app,
+                "POST",
+                "/agents/heartbeat",
+                {"merchant_id": "seller-a", "status": "online", "merchant_token": merchant_token},
+            )
+            with db_session(db_file) as conn:
+                conn.execute(
+                    "update agents set last_seen_at = '2000-01-01T00:00:00' where id = 'mai-cli-merchant-agent:seller-a'"
                 )
-            )
-            self.assertEqual(visible_search["results"][0]["sku"], "bad-a")
 
-            rate_limit_code = None
-            for _ in range(4):
-                try:
-                    self.request_json(base_url, "GET", "/search/products?query=tea")
-                except urllib.error.HTTPError as exc:
-                    rate_limit_code = exc.code
-                    exc.close()
-                    break
-            self.assertEqual(rate_limit_code, 429)
+            with patch.dict("os.environ", {"MAI_AGENT_STALE_TTL_SECONDS": "9999999999"}):
+                agents = _list_agents(db_file)
+
+            self.assertFalse(agents["agents"][0]["stale"])
+            self.assertEqual(agents["agents"][0]["stale_ttl_seconds"], 9999999999)
 
 
 if __name__ == "__main__":

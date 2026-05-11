@@ -115,5 +115,6 @@ cat <<EOF
 Next:
   OpenClaw: restart OpenClaw or refresh skills, then invoke Mai as a skill/agent.
   Hermes:   run 'hermes -s mai' or start Hermes after installing the skill.
-  Smoke:    cd "$ROOT_DIR" && python3 scripts/mai.py --help && python3 scripts/mai_registry.py --help
+  Smoke:    cd "$ROOT_DIR" && python3 scripts/mai.py --help && python3 scripts/mai.py api routes --format json
+  Daemon:   python3 scripts/mai.py agent start --merchant MERCHANT --db ./mai-cli.sqlite --interval 3
 EOF

@@ -1,14 +1,13 @@
 {
-  "name": "mai",
-  "version": "1.1.2",
-  "description": "AI shopping matchmaking agent: merchants publish products and manage stock; buyers discover, compare, discuss, review, and create orders.",
+  "name": "mai-cli",
+  "version": "2.0.0",
+  "description": "mai-cli consultation marketplace: buyers ask local commerce questions and resident merchant agents answer from SQLite-backed trusted state.",
   "keywords": [
     "openclaw",
     "hermes",
-    "shopping",
     "commerce",
     "marketplace",
-    "orders",
+    "consultation",
     "inventory"
   ],
   "author": "harrylabsj",

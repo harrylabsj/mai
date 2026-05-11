@@ -28,9 +28,7 @@ export function resolveProjectRoot(projectRoot) {
   if (explicit) return explicit;
 
   for (const candidate of [DEFAULT_OPENCLAW_SKILL_ROOT, DEFAULT_HERMES_SKILL_ROOT, MODULE_DIR]) {
-    if (fs.existsSync(path.join(candidate, 'scripts', 'mai.py'))) {
-      return candidate;
-    }
+    if (fs.existsSync(path.join(candidate, 'scripts', 'mai.py'))) return candidate;
   }
 
   return DEFAULT_OPENCLAW_SKILL_ROOT;
@@ -43,71 +41,38 @@ export function resolveMaiPluginConfig(api, pluginId = OPENCLAW_PLUGIN_ID) {
 
   return {
     projectRoot: resolveProjectRoot(cfg.projectRoot),
-    dataPath: nonEmptyString(cfg.dataPath) || nonEmptyString(process.env.MAI_DATA),
-    registryUrl: nonEmptyString(cfg.registryUrl) || nonEmptyString(process.env.MAI_REGISTRY_URL),
-    apiKey: nonEmptyString(cfg.apiKey) || nonEmptyString(process.env.MAI_API_KEY),
+    dataPath: nonEmptyString(cfg.dbPath)
+      || nonEmptyString(cfg.dataPath)
+      || nonEmptyString(process.env.MAI_DB)
+      || nonEmptyString(process.env.MAI_DATA),
   };
 }
 
 export function buildMaiCommand({ subcommandArgs = [], dataPath, projectRoot } = {}) {
   const root = resolveProjectRoot(projectRoot);
   const command = ['python3', path.join(root, 'scripts', 'mai.py')];
-  if (dataPath) command.push('--data', String(dataPath));
+  if (dataPath) command.push('--db', String(dataPath));
   command.push(...subcommandArgs.map(String));
   return command;
 }
 
-function maskCommand(command) {
-  const masked = [];
-  for (let i = 0; i < command.length; i += 1) {
-    masked.push(command[i]);
-    if (command[i] === '--api-key' && i + 1 < command.length) {
-      i += 1;
-      masked.push('***');
-    }
-  }
-  return masked;
-}
-
 export function runMaiCli({ subcommandArgs = [], dataPath, projectRoot } = {}) {
   const command = buildMaiCommand({ subcommandArgs, dataPath, projectRoot });
-  const result = spawnSync(command[0], command.slice(1), {
-    encoding: 'utf8',
-  });
-
+  const result = spawnSync(command[0], command.slice(1), { encoding: 'utf8' });
   const stdout = (result.stdout || '').trim();
   const stderr = (result.stderr || '').trim();
 
   if (result.error) {
-    return {
-      ok: false,
-      errorType: 'spawn_error',
-      error: String(result.error.message || result.error),
-      command: maskCommand(command),
-    };
+    return { ok: false, errorType: 'spawn_error', error: String(result.error.message || result.error), command };
   }
-
   if (result.status !== 0) {
-    return {
-      ok: false,
-      errorType: 'cli_exit',
-      error: `mai exited with code ${result.status}`,
-      exitCode: result.status,
-      stdout,
-      stderr,
-      command: maskCommand(command),
-    };
+    return { ok: false, errorType: 'cli_exit', error: `mai exited with code ${result.status}`, exitCode: result.status, stdout, stderr, command };
   }
-
-  if (!stdout) {
-    return { ok: true, status: 'empty_output' };
-  }
+  if (!stdout) return { ok: true, status: 'empty_output' };
 
   try {
     const payload = JSON.parse(stdout);
-    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-      return { ok: true, ...payload };
-    }
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) return { ok: true, ...payload };
     return { ok: true, value: payload };
   } catch {
     return { ok: true, text: stdout };
@@ -120,9 +85,7 @@ function addOptionalArg(args, flag, value) {
 }
 
 function addOptionalNumber(args, flag, value) {
-  if (value !== undefined && value !== null && value !== '') {
-    args.push(flag, String(value));
-  }
+  if (value !== undefined && value !== null && value !== '') args.push(flag, String(value));
 }
 
 function addOptionalTags(args, value) {
@@ -130,12 +93,9 @@ function addOptionalTags(args, value) {
   if (tags) args.push('--tags', tags);
 }
 
-function registryUrl(input, config) {
-  return nonEmptyString(input.registry_url) || nonEmptyString(input.registryUrl) || config.registryUrl;
-}
-
-function registryApiKey(input, config) {
-  return nonEmptyString(input.api_key) || nonEmptyString(input.apiKey) || config.apiKey;
+function addOptionalListArg(args, flag, value) {
+  const items = stringList(value);
+  if (items) args.push(flag, items);
 }
 
 function withPluginConfig(api, handler) {
@@ -143,15 +103,11 @@ function withPluginConfig(api, handler) {
 }
 
 function registerTool(api, spec) {
-  if (typeof api.registerTool === 'function') {
-    api.registerTool(spec);
-  }
+  if (typeof api.registerTool === 'function') api.registerTool(spec);
 }
 
 function registerCommand(api, spec) {
-  if (typeof api.registerCommand === 'function') {
-    api.registerCommand(spec);
-  }
+  if (typeof api.registerCommand === 'function') api.registerCommand(spec);
 }
 
 function toolSpec(api, spec, handler) {
@@ -165,35 +121,20 @@ function toolSpec(api, spec, handler) {
   };
 }
 
-function requireRegistryUrl(input, config) {
-  const url = registryUrl(input, config);
-  if (!url) {
-    return { ok: false, errorType: 'validation', error: 'registry_url is required or configure mai.registryUrl' };
-  }
-  return { ok: true, url };
-}
-
-function addRegistryAuth(args, input, config) {
-  const apiKey = registryApiKey(input, config);
-  if (apiKey) args.push('--api-key', apiKey);
-}
-
 function formatHelp(config) {
   const lines = [
-    'Mai Plugin is loaded.',
-    'Install the mai skill for workflow policy; this plugin adds native tools for deterministic catalog, order, and registry actions.',
-    'Tools: mai_create_merchant, mai_add_product, mai_search_products, mai_compare_products, mai_create_order, mai_registry_search_products, mai_registry_push, mai_registry_order.',
-    'Command: /mai search <query> runs a local product search.',
+    'mai-cli Plugin is loaded.',
+    'Tools: mai_create_merchant, mai_add_product, mai_search_merchants, mai_search_products, mai_buyer_ask, mai_buyer_summarize, mai_record_intent, mai_run_merchant_agent.',
+    'Command: /mai search <query> runs a local marketplace product search.',
   ];
-  if (config.dataPath) lines.push(`dataPath: ${config.dataPath}`);
-  if (config.registryUrl) lines.push(`registryUrl: ${config.registryUrl}`);
+  if (config.dataPath) lines.push(`dbPath: ${config.dataPath}`);
   return lines.join('\n');
 }
 
 export function registerOpenClawPlugin(api) {
   registerTool(api, toolSpec(api, {
     name: 'mai_create_merchant',
-    description: 'Create or update a local Mai merchant profile.',
+    description: 'Create a local mai-cli merchant profile and delivery rule.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -201,22 +142,30 @@ export function registerOpenClawPlugin(api) {
         id: { type: 'string' },
         name: { type: 'string' },
         city: { type: 'string' },
+        service_area: { type: 'string' },
         contact: { type: 'string' },
+        hours: { type: 'string' },
+        delivery_fee: { type: 'number' },
+        delivery_eta_minutes: { type: 'integer' },
         tags: { type: 'array', items: { type: 'string' } },
       },
       required: ['id', 'name'],
     },
   }, async (input, config) => {
-    const args = ['merchant', 'create', '--id', input.id, '--name', input.name];
+    const args = ['merchant', 'create', '--id', input.id, '--name', input.name, '--format', 'json'];
     addOptionalArg(args, '--city', input.city);
+    addOptionalArg(args, '--service-area', input.service_area || input.serviceArea);
     addOptionalArg(args, '--contact', input.contact);
+    addOptionalArg(args, '--hours', input.hours);
+    addOptionalNumber(args, '--delivery-fee', input.delivery_fee);
+    addOptionalNumber(args, '--delivery-eta-minutes', input.delivery_eta_minutes);
     addOptionalTags(args, input.tags);
     return runMaiCli({ subcommandArgs: args, dataPath: config.dataPath, projectRoot: config.projectRoot });
   }));
 
   registerTool(api, toolSpec(api, {
     name: 'mai_add_product',
-    description: 'Add a product listing to a local Mai merchant catalog.',
+    description: 'Add a product listing to a local mai-cli merchant catalog.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -230,206 +179,147 @@ export function registerOpenClawPlugin(api) {
         category: { type: 'string' },
         tags: { type: 'array', items: { type: 'string' } },
         description: { type: 'string' },
-        shipping: { type: 'string' },
+        delivery_attributes: { type: 'array', items: { type: 'string' } },
       },
       required: ['merchant', 'sku', 'title', 'price', 'stock'],
     },
   }, async (input, config) => {
     const args = [
-      'product',
-      'add',
-      '--merchant',
-      input.merchant,
-      '--sku',
-      input.sku,
-      '--title',
-      input.title,
-      '--price',
-      String(input.price),
-      '--stock',
-      String(input.stock),
+      'product', 'add',
+      '--merchant', input.merchant,
+      '--sku', input.sku,
+      '--title', input.title,
+      '--price', String(input.price),
+      '--stock', String(input.stock),
+      '--format', 'json',
     ];
     addOptionalArg(args, '--currency', input.currency);
     addOptionalArg(args, '--category', input.category);
     addOptionalTags(args, input.tags);
     addOptionalArg(args, '--description', input.description);
-    addOptionalArg(args, '--shipping', input.shipping);
+    addOptionalListArg(args, '--delivery-attributes', input.delivery_attributes);
     return runMaiCli({ subcommandArgs: args, dataPath: config.dataPath, projectRoot: config.projectRoot });
   }));
 
   registerTool(api, toolSpec(api, {
-    name: 'mai_search_products',
-    description: 'Search local Mai products with deterministic inventory and price filters.',
+    name: 'mai_search_merchants',
+    description: 'Search local mai-cli merchants by query and city.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         query: { type: 'string' },
-        max_price: { type: 'number' },
         city: { type: 'string' },
+      },
+    },
+  }, async (input, config) => {
+    const args = ['search', 'merchants', '--format', 'json'];
+    addOptionalArg(args, '--query', input.query);
+    addOptionalArg(args, '--city', input.city);
+    return runMaiCli({ subcommandArgs: args, dataPath: config.dataPath, projectRoot: config.projectRoot });
+  }));
+
+  registerTool(api, toolSpec(api, {
+    name: 'mai_search_products',
+    description: 'Search local mai-cli products with deterministic inventory and delivery data.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        query: { type: 'string' },
+        city: { type: 'string' },
+        area: { type: 'string' },
+        max_price: { type: 'number' },
         include_out_of_stock: { type: 'boolean' },
       },
     },
   }, async (input, config) => {
     const args = ['search', 'products', '--format', 'json'];
     addOptionalArg(args, '--query', input.query);
-    addOptionalNumber(args, '--max-price', input.max_price);
     addOptionalArg(args, '--city', input.city);
+    addOptionalArg(args, '--area', input.area);
+    addOptionalNumber(args, '--max-price', input.max_price);
     if (input.include_out_of_stock) args.push('--include-out-of-stock');
     return runMaiCli({ subcommandArgs: args, dataPath: config.dataPath, projectRoot: config.projectRoot });
   }));
 
   registerTool(api, toolSpec(api, {
-    name: 'mai_compare_products',
-    description: 'Compare local Mai products by SKU and return the best value signal.',
-    parameters: {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        skus: {
-          oneOf: [
-            { type: 'array', items: { type: 'string' } },
-            { type: 'string' },
-          ],
-        },
-      },
-      required: ['skus'],
-    },
-  }, async (input, config) => {
-    const skus = Array.isArray(input.skus) ? input.skus.join(',') : String(input.skus);
-    return runMaiCli({
-      subcommandArgs: ['compare', '--skus', skus, '--format', 'json'],
-      dataPath: config.dataPath,
-      projectRoot: config.projectRoot,
-    });
-  }));
-
-  registerTool(api, toolSpec(api, {
-    name: 'mai_create_order',
-    description: 'Create a local Mai draft order after buyer confirmation.',
+    name: 'mai_buyer_ask',
+    description: 'Search candidates and open a buyer consultation conversation.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         buyer: { type: 'string' },
-        merchant: { type: 'string' },
-        sku: { type: 'string' },
-        quantity: { type: 'integer' },
-        offer_price: { type: 'number' },
-        note: { type: 'string' },
-      },
-      required: ['buyer', 'merchant', 'sku', 'quantity'],
-    },
-  }, async (input, config) => {
-    const args = [
-      'order',
-      'create',
-      '--buyer',
-      input.buyer,
-      '--merchant',
-      input.merchant,
-      '--sku',
-      input.sku,
-      '--quantity',
-      String(input.quantity),
-    ];
-    addOptionalNumber(args, '--offer-price', input.offer_price);
-    addOptionalArg(args, '--note', input.note);
-    return runMaiCli({ subcommandArgs: args, dataPath: config.dataPath, projectRoot: config.projectRoot });
-  }));
-
-  registerTool(api, toolSpec(api, {
-    name: 'mai_registry_search_products',
-    description: 'Search a hosted Mai registry marketplace. Public search is rate limited by the registry.',
-    parameters: {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        registry_url: { type: 'string' },
-        api_key: { type: 'string' },
-        query: { type: 'string' },
-        max_price: { type: 'number' },
+        text: { type: 'string' },
         city: { type: 'string' },
-        include_out_of_stock: { type: 'boolean' },
+        area: { type: 'string' },
       },
+      required: ['buyer', 'text'],
     },
   }, async (input, config) => {
-    const required = requireRegistryUrl(input, config);
-    if (!required.ok) return required;
-    const args = ['registry', 'search-products', '--url', required.url, '--format', 'json'];
-    addRegistryAuth(args, input, config);
-    addOptionalArg(args, '--query', input.query);
-    addOptionalNumber(args, '--max-price', input.max_price);
+    const args = ['buyer', 'ask', '--buyer', input.buyer, '--text', input.text, '--format', 'json'];
     addOptionalArg(args, '--city', input.city);
-    if (input.include_out_of_stock) args.push('--include-out-of-stock');
+    addOptionalArg(args, '--area', input.area);
     return runMaiCli({ subcommandArgs: args, dataPath: config.dataPath, projectRoot: config.projectRoot });
   }));
 
   registerTool(api, toolSpec(api, {
-    name: 'mai_registry_push',
-    description: 'Push the local merchant catalog to a hosted Mai registry using a merchant API key.',
+    name: 'mai_buyer_summarize',
+    description: 'Summarize a consultation option, warnings, and missing facts.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        registry_url: { type: 'string' },
-        api_key: { type: 'string' },
+        conversation: { type: 'string' },
       },
+      required: ['conversation'],
     },
-  }, async (input, config) => {
-    const required = requireRegistryUrl(input, config);
-    if (!required.ok) return required;
-    const args = ['registry', 'push', '--url', required.url, '--format', 'json'];
-    addRegistryAuth(args, input, config);
-    return runMaiCli({ subcommandArgs: args, dataPath: config.dataPath, projectRoot: config.projectRoot });
-  }));
+  }, async (input, config) => runMaiCli({
+    subcommandArgs: ['buyer', 'summarize', '--conversation', input.conversation, '--format', 'json'],
+    dataPath: config.dataPath,
+    projectRoot: config.projectRoot,
+  })));
 
   registerTool(api, toolSpec(api, {
-    name: 'mai_registry_order',
-    description: 'Create a draft order in a hosted Mai registry using buyer authorization.',
+    name: 'mai_record_intent',
+    description: 'Record quote_request or purchase_intent as conversation context only.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        registry_url: { type: 'string' },
-        api_key: { type: 'string' },
-        buyer: { type: 'string' },
+        conversation: { type: 'string' },
+        intent: { type: 'string', enum: ['quote_request', 'purchase_intent'] },
+        text: { type: 'string' },
+      },
+      required: ['conversation', 'intent', 'text'],
+    },
+  }, async (input, config) => runMaiCli({
+    subcommandArgs: ['buyer', 'intent', '--conversation', input.conversation, '--intent', input.intent, '--text', input.text, '--format', 'json'],
+    dataPath: config.dataPath,
+    projectRoot: config.projectRoot,
+  })));
+
+  registerTool(api, toolSpec(api, {
+    name: 'mai_run_merchant_agent',
+    description: 'Run one deterministic resident merchant-agent polling pass.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
         merchant: { type: 'string' },
-        sku: { type: 'string' },
-        quantity: { type: 'integer' },
-        offer_price: { type: 'number' },
-        note: { type: 'string' },
       },
-      required: ['buyer', 'merchant', 'sku', 'quantity'],
+      required: ['merchant'],
     },
-  }, async (input, config) => {
-    const required = requireRegistryUrl(input, config);
-    if (!required.ok) return required;
-    const args = [
-      'registry',
-      'order',
-      '--url',
-      required.url,
-      '--buyer',
-      input.buyer,
-      '--merchant',
-      input.merchant,
-      '--sku',
-      input.sku,
-      '--quantity',
-      String(input.quantity),
-      '--format',
-      'json',
-    ];
-    addRegistryAuth(args, input, config);
-    addOptionalNumber(args, '--offer-price', input.offer_price);
-    addOptionalArg(args, '--note', input.note);
-    return runMaiCli({ subcommandArgs: args, dataPath: config.dataPath, projectRoot: config.projectRoot });
-  }));
+  }, async (input, config) => runMaiCli({
+    subcommandArgs: ['agent', 'run', '--merchant', input.merchant, '--once', '--format', 'json'],
+    dataPath: config.dataPath,
+    projectRoot: config.projectRoot,
+  })));
 
   registerCommand(api, {
     name: 'mai',
-    description: 'Show Mai plugin help or run a local product search.',
+    description: 'Show mai-cli plugin help or run a local product search.',
     acceptsArgs: true,
     handler: async (ctx = {}) => {
       const rawArgs = String(ctx.args || ctx.text || '').trim();

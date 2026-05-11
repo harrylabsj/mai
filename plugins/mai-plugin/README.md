@@ -1,19 +1,13 @@
-# Mai Plugin
+# mai-cli Plugin
 
-`mai-plugin` is the lightweight OpenClaw native bridge for the `mai` skill.
+`mai-plugin` is the lightweight OpenClaw native bridge for local mai-cli consultation tools.
 
-Install the pair:
+It exposes tools for merchant setup, product publishing, product search, buyer consultations, merchant-agent polling, summaries, and recording `quote_request` or `purchase_intent` as conversation messages.
 
-```bash
-clawhub --workdir ~/.openclaw/workspace --dir skills install mai
-openclaw plugins install clawhub:mai-plugin
-```
-
-The plugin exposes native tools for local catalog actions and hosted registry actions, then calls the Python CLI from the installed `mai` skill. Configure `projectRoot` only if the skill is installed somewhere other than `~/.openclaw/workspace/skills/mai` or `~/.hermes/skills/commerce/mai`.
+Configure `projectRoot` only if the skill is installed somewhere other than `~/.openclaw/workspace/skills/mai` or `~/.hermes/skills/commerce/mai`.
 
 Environment fallbacks:
 
 - `MAI_ROOT`
-- `MAI_DATA`
-- `MAI_REGISTRY_URL`
-- `MAI_API_KEY`
+- `MAI_DB`
+- `MAI_DATA` deprecated alias for `MAI_DB`

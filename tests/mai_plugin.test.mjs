@@ -16,15 +16,15 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 test('buildMaiCommand points at the bundled Python CLI', () => {
   const command = buildMaiCommand({
     projectRoot: '/tmp/mai',
-    dataPath: '/tmp/mai.json',
+    dataPath: '/tmp/mai.sqlite',
     subcommandArgs: ['search', 'products', '--format', 'json'],
   });
 
   assert.deepEqual(command, [
     'python3',
     path.join('/tmp/mai', 'scripts', 'mai.py'),
-    '--data',
-    '/tmp/mai.json',
+    '--db',
+    '/tmp/mai.sqlite',
     'search',
     'products',
     '--format',
@@ -40,9 +40,7 @@ test('resolveMaiPluginConfig reads OpenClaw plugin config', () => {
           'mai-plugin': {
             config: {
               projectRoot: '/tmp/project',
-              dataPath: '/tmp/data.json',
-              registryUrl: 'http://127.0.0.1:8765',
-              apiKey: 'secret',
+              dbPath: '/tmp/data.sqlite',
             },
           },
         },
@@ -52,9 +50,7 @@ test('resolveMaiPluginConfig reads OpenClaw plugin config', () => {
 
   assert.deepEqual(resolveMaiPluginConfig(api), {
     projectRoot: '/tmp/project',
-    dataPath: '/tmp/data.json',
-    registryUrl: 'http://127.0.0.1:8765',
-    apiKey: 'secret',
+    dataPath: '/tmp/data.sqlite',
   });
 });
 
@@ -78,12 +74,12 @@ test('registerOpenClawPlugin exposes marketplace tools and command', () => {
   assert.deepEqual(new Set(calls.tools.map((tool) => tool.name)), new Set([
     'mai_create_merchant',
     'mai_add_product',
+    'mai_search_merchants',
     'mai_search_products',
-    'mai_compare_products',
-    'mai_create_order',
-    'mai_registry_search_products',
-    'mai_registry_push',
-    'mai_registry_order',
+    'mai_buyer_ask',
+    'mai_buyer_summarize',
+    'mai_record_intent',
+    'mai_run_merchant_agent',
   ]));
   assert.equal(calls.commands.length, 1);
   assert.equal(calls.commands[0].name, 'mai');
@@ -91,7 +87,7 @@ test('registerOpenClawPlugin exposes marketplace tools and command', () => {
 
 test('registered local tools can create and search products', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mai-openclaw-'));
-  const dataPath = path.join(tmpDir, 'mai.json');
+  const dataPath = path.join(tmpDir, 'mai.sqlite');
   const tools = new Map();
   const api = {
     registerTool(spec) {
@@ -117,6 +113,8 @@ test('registered local tools can create and search products', async () => {
     id: 'seller-a',
     name: 'West Lake Tea',
     city: 'Hangzhou',
+    service_area: 'West Lake',
+    delivery_eta_minutes: 45,
     contact: 'wechat:westlake',
     tags: ['tea', 'gift'],
   });
@@ -138,6 +136,27 @@ test('registered local tools can create and search products', async () => {
   });
   assert.equal(search.ok, true);
   assert.equal(search.results[0].sku, 'tea-a');
+
+  const merchants = await tools.get('mai_search_merchants').handler({
+    query: 'west lake',
+    city: 'Hangzhou',
+  });
+  assert.equal(merchants.ok, true);
+  assert.equal(merchants.results[0].id, 'seller-a');
+
+  const ask = await tools.get('mai_buyer_ask').handler({
+    buyer: 'alice',
+    text: 'longjing gift delivery today',
+    city: 'Hangzhou',
+  });
+  assert.equal(ask.ok, true);
+  assert.equal(ask.conversation.id, 'CONV-0001');
+
+  const agent = await tools.get('mai_run_merchant_agent').handler({
+    merchant: 'seller-a',
+  });
+  assert.equal(agent.ok, true);
+  assert.equal(agent.replied[0].conversation_id, 'CONV-0001');
 });
 
 test('OpenClaw package metadata is present and versioned with package.json', () => {
