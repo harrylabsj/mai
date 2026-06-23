@@ -1,6 +1,6 @@
 {
   "name": "mai",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "Local-first AI shopping matchmaking agent for OpenClaw and Hermes.",
   "bin": {
     "mai": "scripts/mai.py",

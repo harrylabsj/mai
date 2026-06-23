@@ -109,7 +109,7 @@ assert "TODO" not in skill
 package = json.loads((root / "package.json").read_text(encoding="utf-8"))
 clawhub = json.loads((root / "clawhub.json").read_text(encoding="utf-8"))
 assert package["name"] == clawhub["name"] == "mai"
-assert package["version"] == clawhub["version"] == "1.1.2"
+assert package["version"] == clawhub["version"]
 plugin_package = json.loads((root / "plugins" / "mai-plugin" / "package.json").read_text(encoding="utf-8"))
 plugin = json.loads((root / "plugins" / "mai-plugin" / "openclaw.plugin.json").read_text(encoding="utf-8"))
 assert plugin_package["name"] == plugin["id"] == "mai-plugin"

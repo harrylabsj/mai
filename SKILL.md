@@ -1,5 +1,6 @@
 ---
 name: mai
+version: 1.1.3
 description: "AI shopping matchmaking agent for OpenClaw and Hermes. Use when merchants want to publish products, manage stock, answer buyer questions, and handle order requests; or when buyers want to discover merchants and products, compare prices, discuss with sellers, read reviews, and create trackable orders. Supports local-first transaction tracking and registry-backed PSP custody records."
 ---
 
@@ -19,6 +20,41 @@ Mai can run local-only or registry-backed. Use local-only for one agent's privat
 - Preserve negotiation context. Record important buyer/merchant messages with `message add` before forming or updating an order.
 - Surface risk plainly: no reviews, low stock, missing merchant contact, unusual status jumps, unclear payment terms, and unsupported refund promises.
 - Prefer short, actionable answers: recommendation, reason, risk, next action.
+
+## Quality Upgrade: Money-Line Workflows
+
+Mai sits on the same money line as local-life, delivery, and knowledge-backed shopping agents. Treat churn as a quality signal first: users usually need clearer matching, trust evidence, and transaction boundaries before they need more features.
+
+### Buyer Discovery
+
+1. Capture intent: product, budget, city/shipping constraints, urgency, trust threshold, and must-avoid conditions.
+2. Search and compare candidates with deterministic CLI output before writing a recommendation.
+3. Explain the best match, runner-up, tradeoff, missing evidence, and next action.
+4. Do not create an order until the buyer explicitly confirms SKU, quantity, price, merchant, and terms in the current turn.
+
+### Merchant Operations
+
+1. Confirm the merchant id and product SKU before changing catalog, stock, price, or order state.
+2. Show old value, new value, reason, and rollback/compensation step.
+3. For stock reservation, require clear inventory evidence and an order status transition that matches the transaction model.
+4. Record meaningful buyer/merchant messages before quoting or updating an order.
+
+### Payment and Trust
+
+- Never call the bundled `demo` provider real escrow or real money movement.
+- Do not claim paid, released, refunded, or completed without PSP or external evidence.
+- Surface trust signals: review count, merchant contact, stock freshness, status history, and dispute/refund policy.
+- When evidence is weak, recommend a lower-risk next step instead of pushing the transaction forward.
+
+Preferred product recommendation:
+
+```text
+Best match: <sku + merchant>
+Why: <fit to intent>
+Tradeoff: <price, stock, trust, shipping>
+Risk: <missing evidence or transaction concern>
+Next action: <ask, message, quote, or confirm order>
+```
 
 ## Quick Start
 
