@@ -5,10 +5,10 @@ The registry is a lightweight hosted marketplace service implemented by `scripts
 ## Discovery Flow
 
 1. Merchant agent creates merchant/product records locally.
-2. Merchant agent pushes its local store to the registry.
+2. Merchant agent pushes its local catalog to the registry after explicit confirmation.
 3. Buyer agent searches registry products or merchants.
-4. Buyer agent creates registry messages or draft orders.
-5. Merchant agent pulls registry inbox items back into its local store.
+4. Buyer agent creates registry messages or draft orders after explicit confirmation.
+5. Merchant agent previews and pulls registry inbox items back into its local store after explicit confirmation.
 
 ## Run
 
@@ -33,6 +33,13 @@ API keys are stored as salted SHA-256 hashes. The raw token is shown only when t
 
 Public product/merchant search does not require a key, but it is still rate-limited by client IP.
 
+CLI and plugin boundary:
+
+- Remote registry URLs must use HTTPS.
+- `http://127.0.0.1` and `http://localhost` are allowed only for local development with `--allow-insecure-localhost` or plugin `allow_insecure_localhost=true`.
+- Registry write actions require CLI `--confirm` or plugin `confirm=true`.
+- `mai.py registry push` publishes catalog data by default; it excludes orders/messages unless `--include-orders` is explicitly supplied for a reviewed private migration.
+
 ## Endpoints
 
 ### `GET /health`
@@ -41,7 +48,7 @@ Returns service status.
 
 ### `POST /sync/push`
 
-Body: a Mai local JSON store.
+Body: a Mai catalog snapshot. The CLI strips local orders, messages, and pending sync events unless `--include-orders` is explicitly supplied.
 
 Auth: merchant key scoped to all merchants/products in the pushed store, or admin key.
 

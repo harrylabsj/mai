@@ -41,7 +41,7 @@ test('resolveMaiPluginConfig reads OpenClaw plugin config', () => {
             config: {
               projectRoot: '/tmp/project',
               dataPath: '/tmp/data.json',
-              registryUrl: 'http://127.0.0.1:8765',
+              registryUrl: 'https://registry.example.test',
               apiKey: 'secret',
             },
           },
@@ -53,7 +53,7 @@ test('resolveMaiPluginConfig reads OpenClaw plugin config', () => {
   assert.deepEqual(resolveMaiPluginConfig(api), {
     projectRoot: '/tmp/project',
     dataPath: '/tmp/data.json',
-    registryUrl: 'http://127.0.0.1:8765',
+    registryUrl: 'https://registry.example.test',
     apiKey: 'secret',
   });
 });
@@ -138,6 +138,44 @@ test('registered local tools can create and search products', async () => {
   });
   assert.equal(search.ok, true);
   assert.equal(search.results[0].sku, 'tea-a');
+});
+
+test('registered registry write tools require explicit confirmation', async () => {
+  const tools = new Map();
+  const api = {
+    registerTool(spec) {
+      tools.set(spec.name, spec);
+    },
+    config: {
+      plugins: {
+        entries: {
+          'mai-plugin': {
+            config: {
+              projectRoot: REPO_ROOT,
+              registryUrl: 'https://registry.example.test',
+            },
+          },
+        },
+      },
+    },
+  };
+
+  registerOpenClawPlugin(api);
+
+  const push = await tools.get('mai_registry_push').handler({});
+  assert.equal(push.ok, false);
+  assert.equal(push.errorType, 'validation');
+  assert.match(push.error, /confirm=true/);
+
+  const order = await tools.get('mai_registry_order').handler({
+    buyer: 'alice',
+    merchant: 'seller-a',
+    sku: 'tea-a',
+    quantity: 1,
+  });
+  assert.equal(order.ok, false);
+  assert.equal(order.errorType, 'validation');
+  assert.match(order.error, /confirm=true/);
 });
 
 test('OpenClaw package metadata is present and versioned with package.json', () => {

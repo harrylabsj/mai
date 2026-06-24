@@ -6,10 +6,10 @@ Mai stores a JSON document at `~/.local/share/mai/mai.json` by default. Use `--d
 
 ```json
 {
-  "version": "1.1.2",
+  "version": "1.1.4",
   "sync": {
     "mode": "local-first",
-    "schema_version": "1.1.2",
+    "schema_version": "1.1.4",
     "remote_marketplace_url": "",
     "pending_events": []
   },
@@ -94,13 +94,13 @@ The registry uses the same top-level schema as local stores, plus:
 {
   "registry": {
     "service": "mai-registry",
-    "version": "1.1.2",
+    "version": "1.1.4",
     "created_at": "ISO-8601"
   }
 }
 ```
 
-Merchant agents push local snapshots into the registry. Buyer agents create registry messages and draft orders. Merchant agents pull inbox data and merge it back into local `messages` and `orders`.
+Merchant agents push catalog snapshots into the registry. The CLI keeps registry push catalog-only by default and omits orders/messages unless `--include-orders` is explicitly supplied for a reviewed private migration. Buyer agents create registry messages and draft orders. Merchant agents pull inbox data and merge it back into local `messages` and `orders` only after explicit confirmation.
 
 ## Public Registry Extensions
 

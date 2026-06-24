@@ -16,12 +16,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
 APP_NAME = "mai"
-VERSION = "1.1.2"
+VERSION = "1.1.4"
 HOME_DATA_PATH = Path.home() / ".local" / "share" / APP_NAME / "mai.json"
 DATA_PATH_OVERRIDE: Optional[Path] = None
 
@@ -52,6 +52,8 @@ ORDER_TRANSITIONS = {
     "refunded": set(),
     "cancelled": set(),
 }
+
+LOCAL_REGISTRY_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def now_iso() -> str:
@@ -109,6 +111,63 @@ def emit_json(value: Any) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
 
 
+def is_local_registry_url(base_url: str) -> bool:
+    parsed = urlparse(base_url)
+    return parsed.hostname in LOCAL_REGISTRY_HOSTS
+
+
+def validate_registry_url(base_url: str, allow_insecure_localhost: bool = False) -> None:
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise SystemExit("Registry URL must be an absolute http(s) URL")
+    if parsed.scheme == "https":
+        return
+    if allow_insecure_localhost and is_local_registry_url(base_url):
+        return
+    raise SystemExit(
+        "Refusing insecure registry URL. Use HTTPS for remote registries, or add "
+        "--allow-insecure-localhost for local 127.0.0.1/localhost development only."
+    )
+
+
+def require_registry_confirmation(args: argparse.Namespace, action: str, detail: str) -> None:
+    if getattr(args, "confirm", False):
+        return
+    if getattr(args, "format", "text") == "json":
+        emit_json({
+            "ok": False,
+            "error": "confirmation_required",
+            "action": action,
+            "detail": detail,
+            "rerun_with": "--confirm",
+        })
+        raise SystemExit(2)
+    raise SystemExit(
+        f"Confirmation required for registry {action}: {detail}. "
+        "Review the target URL, data scope, and API key, then rerun with --confirm."
+    )
+
+
+def registry_push_payload(store: Dict[str, Any], include_orders: bool = False) -> Dict[str, Any]:
+    """Build a registry push payload.
+
+    Default push publishes merchant/product/review inventory data only. Order,
+    message, and pending sync data remain available through explicit
+    --include-orders for migrations or controlled private registries.
+    """
+    payload = {
+        **store,
+        "sync": {
+            **store.get("sync", {}),
+            "pending_events": [] if not include_orders else store.get("sync", {}).get("pending_events", []),
+        },
+    }
+    if not include_orders:
+        payload["orders"] = {}
+        payload["messages"] = []
+    return payload
+
+
 def registry_request(
     base_url: str,
     method: str,
@@ -116,7 +175,9 @@ def registry_request(
     payload: Optional[Dict[str, Any]] = None,
     query: Optional[Dict[str, Any]] = None,
     api_key: Optional[str] = None,
+    allow_insecure_localhost: bool = False,
 ) -> Dict[str, Any]:
+    validate_registry_url(base_url, allow_insecure_localhost=allow_insecure_localhost)
     url = base_url.rstrip("/") + path
     if query:
         filtered = {key: value for key, value in query.items() if value not in (None, "")}
@@ -756,8 +817,22 @@ def cmd_order_list(args: argparse.Namespace) -> None:
 
 
 def cmd_registry_push(args: argparse.Namespace) -> None:
+    require_registry_confirmation(
+        args,
+        "push",
+        "send local merchant/product data to a registry"
+        + (" including orders/messages" if args.include_orders else "")
+    )
     store = load_store()
-    result = registry_request(args.url, "POST", "/sync/push", store, api_key=args.api_key)
+    payload = registry_push_payload(store, include_orders=args.include_orders)
+    result = registry_request(
+        args.url,
+        "POST",
+        "/sync/push",
+        payload,
+        api_key=args.api_key,
+        allow_insecure_localhost=args.allow_insecure_localhost,
+    )
     store.setdefault("sync", {})["remote_marketplace_url"] = args.url.rstrip("/")
     save_store(store)
     if args.format == "json":
@@ -783,6 +858,7 @@ def cmd_registry_search_products(args: argparse.Namespace) -> None:
             "include_out_of_stock": "true" if args.include_out_of_stock else "",
         },
         api_key=args.api_key,
+        allow_insecure_localhost=args.allow_insecure_localhost,
     )
     if args.format == "json":
         emit_json({"results": result["results"]})
@@ -795,7 +871,14 @@ def cmd_registry_search_products(args: argparse.Namespace) -> None:
 
 
 def cmd_registry_search_merchants(args: argparse.Namespace) -> None:
-    result = registry_request(args.url, "GET", "/search/merchants", query={"query": args.query}, api_key=args.api_key)
+    result = registry_request(
+        args.url,
+        "GET",
+        "/search/merchants",
+        query={"query": args.query},
+        api_key=args.api_key,
+        allow_insecure_localhost=args.allow_insecure_localhost,
+    )
     if args.format == "json":
         emit_json({"results": result["results"]})
     else:
@@ -804,6 +887,7 @@ def cmd_registry_search_merchants(args: argparse.Namespace) -> None:
 
 
 def cmd_registry_message(args: argparse.Namespace) -> None:
+    require_registry_confirmation(args, "message", "send a buyer/merchant message to a registry")
     payload = {
         "buyer_id": args.buyer,
         "merchant_id": args.merchant,
@@ -811,7 +895,14 @@ def cmd_registry_message(args: argparse.Namespace) -> None:
         "sender": args.sender,
         "text": args.text,
     }
-    result = registry_request(args.url, "POST", "/messages", payload, api_key=args.api_key)
+    result = registry_request(
+        args.url,
+        "POST",
+        "/messages",
+        payload,
+        api_key=args.api_key,
+        allow_insecure_localhost=args.allow_insecure_localhost,
+    )
     store = load_store()
     store.setdefault("sync", {})["remote_marketplace_url"] = args.url.rstrip("/")
     save_store(store)
@@ -822,6 +913,7 @@ def cmd_registry_message(args: argparse.Namespace) -> None:
 
 
 def cmd_registry_order(args: argparse.Namespace) -> None:
+    require_registry_confirmation(args, "order", "create a draft order in a registry")
     payload = {
         "buyer_id": args.buyer,
         "merchant_id": args.merchant,
@@ -830,7 +922,14 @@ def cmd_registry_order(args: argparse.Namespace) -> None:
         "offer_price": args.offer_price,
         "note": args.note,
     }
-    result = registry_request(args.url, "POST", "/orders", payload, api_key=args.api_key)
+    result = registry_request(
+        args.url,
+        "POST",
+        "/orders",
+        payload,
+        api_key=args.api_key,
+        allow_insecure_localhost=args.allow_insecure_localhost,
+    )
     store = load_store()
     store.setdefault("sync", {})["remote_marketplace_url"] = args.url.rstrip("/")
     save_store(store)
@@ -841,9 +940,50 @@ def cmd_registry_order(args: argparse.Namespace) -> None:
 
 
 def cmd_registry_pull(args: argparse.Namespace) -> None:
-    result = registry_request(args.url, "GET", f"/merchants/{args.merchant}/inbox", api_key=args.api_key)
+    require_registry_confirmation(args, "pull", "merge registry messages/orders into local state")
+    result = registry_request(
+        args.url,
+        "GET",
+        f"/merchants/{args.merchant}/inbox",
+        api_key=args.api_key,
+        allow_insecure_localhost=args.allow_insecure_localhost,
+    )
     store = load_store()
     store.setdefault("sync", {})["remote_marketplace_url"] = args.url.rstrip("/")
+
+    conflicts = [
+        order["id"]
+        for order in result["orders"]
+        if order["id"] in store["orders"] and store["orders"][order["id"]] != order
+    ]
+    if conflicts and not args.allow_overwrite:
+        output = {
+            "ok": False,
+            "error": "conflict",
+            "conflicts": conflicts,
+            "message": "Remote registry orders conflict with local order ids. Rerun with --allow-overwrite after review.",
+        }
+        if args.format == "json":
+            emit_json(output)
+            raise SystemExit(3)
+        raise SystemExit(output["message"])
+
+    if args.preview:
+        output = {
+            "ok": True,
+            "preview": True,
+            "merchant_id": args.merchant,
+            "available": {"messages": len(result["messages"]), "orders": len(result["orders"])},
+            "conflicts": conflicts,
+        }
+        if args.format == "json":
+            emit_json(output)
+        else:
+            print(
+                f"Registry pull preview: {len(result['messages'])} messages, "
+                f"{len(result['orders'])} orders, conflicts={len(conflicts)}"
+            )
+        return
 
     existing_message_keys = {
         message.get("registry_id") or (
@@ -889,6 +1029,7 @@ def cmd_registry_pull(args: argparse.Namespace) -> None:
 
 
 def cmd_registry_payment_hold(args: argparse.Namespace) -> None:
+    require_registry_confirmation(args, "payment-hold", "create a PSP custody record for an order")
     result = registry_request(
         args.url,
         "POST",
@@ -898,6 +1039,7 @@ def cmd_registry_payment_hold(args: argparse.Namespace) -> None:
             "order_id": args.order,
         },
         api_key=args.api_key,
+        allow_insecure_localhost=args.allow_insecure_localhost,
     )
     if args.format == "json":
         emit_json(result)
@@ -906,12 +1048,14 @@ def cmd_registry_payment_hold(args: argparse.Namespace) -> None:
 
 
 def cmd_registry_payment_release(args: argparse.Namespace) -> None:
+    require_registry_confirmation(args, "payment-release", "release a PSP custody record")
     result = registry_request(
         args.url,
         "POST",
         f"/payments/{args.payment}/release",
         {"note": args.note or ""},
         api_key=args.api_key,
+        allow_insecure_localhost=args.allow_insecure_localhost,
     )
     if args.format == "json":
         emit_json(result)
@@ -920,12 +1064,14 @@ def cmd_registry_payment_release(args: argparse.Namespace) -> None:
 
 
 def cmd_registry_payment_refund(args: argparse.Namespace) -> None:
+    require_registry_confirmation(args, "payment-refund", "refund a PSP custody record")
     result = registry_request(
         args.url,
         "POST",
         f"/payments/{args.payment}/refund",
         {"note": args.note or ""},
         api_key=args.api_key,
+        allow_insecure_localhost=args.allow_insecure_localhost,
     )
     if args.format == "json":
         emit_json(result)
@@ -1069,11 +1215,15 @@ def build_parser() -> argparse.ArgumentParser:
     registry_push = registry_sub.add_parser("push", help="Push this local store to a registry")
     registry_push.add_argument("--url", required=True)
     registry_push.add_argument("--api-key", default="")
+    registry_push.add_argument("--confirm", action="store_true", help="Confirm sending local marketplace data to this registry")
+    registry_push.add_argument("--include-orders", action="store_true", help="Also push local orders/messages; default publishes catalog data only")
+    registry_push.add_argument("--allow-insecure-localhost", action="store_true", help="Allow http://127.0.0.1 or http://localhost for local development only")
     registry_push.add_argument("--format", choices=["text", "json"], default="text")
     registry_push.set_defaults(func=cmd_registry_push)
     registry_search_products = registry_sub.add_parser("search-products", help="Search products in a registry")
     registry_search_products.add_argument("--url", required=True)
     registry_search_products.add_argument("--api-key", default="")
+    registry_search_products.add_argument("--allow-insecure-localhost", action="store_true", help="Allow http://127.0.0.1 or http://localhost for local development only")
     registry_search_products.add_argument("--query", default="")
     registry_search_products.add_argument("--max-price", type=float)
     registry_search_products.add_argument("--city", default="")
@@ -1083,12 +1233,15 @@ def build_parser() -> argparse.ArgumentParser:
     registry_search_merchants = registry_sub.add_parser("search-merchants", help="Search merchants in a registry")
     registry_search_merchants.add_argument("--url", required=True)
     registry_search_merchants.add_argument("--api-key", default="")
+    registry_search_merchants.add_argument("--allow-insecure-localhost", action="store_true", help="Allow http://127.0.0.1 or http://localhost for local development only")
     registry_search_merchants.add_argument("--query", default="")
     registry_search_merchants.add_argument("--format", choices=["text", "json"], default="text")
     registry_search_merchants.set_defaults(func=cmd_registry_search_merchants)
     registry_message = registry_sub.add_parser("message", help="Create a buyer/merchant message in a registry")
     registry_message.add_argument("--url", required=True)
     registry_message.add_argument("--api-key", default="")
+    registry_message.add_argument("--confirm", action="store_true", help="Confirm sending this message to the registry")
+    registry_message.add_argument("--allow-insecure-localhost", action="store_true", help="Allow http://127.0.0.1 or http://localhost for local development only")
     registry_message.add_argument("--buyer", required=True)
     registry_message.add_argument("--merchant", required=True)
     registry_message.add_argument("--sku", default="")
@@ -1099,6 +1252,8 @@ def build_parser() -> argparse.ArgumentParser:
     registry_order = registry_sub.add_parser("order", help="Create a draft order in a registry")
     registry_order.add_argument("--url", required=True)
     registry_order.add_argument("--api-key", default="")
+    registry_order.add_argument("--confirm", action="store_true", help="Confirm creating this draft order in the registry")
+    registry_order.add_argument("--allow-insecure-localhost", action="store_true", help="Allow http://127.0.0.1 or http://localhost for local development only")
     registry_order.add_argument("--buyer", required=True)
     registry_order.add_argument("--merchant", required=True)
     registry_order.add_argument("--sku", required=True)
@@ -1111,11 +1266,17 @@ def build_parser() -> argparse.ArgumentParser:
     registry_pull.add_argument("--url", required=True)
     registry_pull.add_argument("--api-key", default="")
     registry_pull.add_argument("--merchant", required=True)
+    registry_pull.add_argument("--confirm", action="store_true", help="Confirm merging registry data into the local store")
+    registry_pull.add_argument("--preview", action="store_true", help="Preview available messages/orders without writing local state")
+    registry_pull.add_argument("--allow-overwrite", action="store_true", help="Allow remote orders to overwrite conflicting local order ids")
+    registry_pull.add_argument("--allow-insecure-localhost", action="store_true", help="Allow http://127.0.0.1 or http://localhost for local development only")
     registry_pull.add_argument("--format", choices=["text", "json"], default="text")
     registry_pull.set_defaults(func=cmd_registry_pull)
     registry_payment_hold = registry_sub.add_parser("payment-hold", help="Create a PSP-backed payment hold for an order")
     registry_payment_hold.add_argument("--url", required=True)
     registry_payment_hold.add_argument("--api-key", default="")
+    registry_payment_hold.add_argument("--confirm", action="store_true", help="Confirm creating this PSP custody record")
+    registry_payment_hold.add_argument("--allow-insecure-localhost", action="store_true", help="Allow http://127.0.0.1 or http://localhost for local development only")
     registry_payment_hold.add_argument("--buyer", required=True)
     registry_payment_hold.add_argument("--order", required=True)
     registry_payment_hold.add_argument("--format", choices=["text", "json"], default="text")
@@ -1123,6 +1284,8 @@ def build_parser() -> argparse.ArgumentParser:
     registry_payment_release = registry_sub.add_parser("payment-release", help="Release a held payment to the seller")
     registry_payment_release.add_argument("--url", required=True)
     registry_payment_release.add_argument("--api-key", default="")
+    registry_payment_release.add_argument("--confirm", action="store_true", help="Confirm releasing this PSP custody record")
+    registry_payment_release.add_argument("--allow-insecure-localhost", action="store_true", help="Allow http://127.0.0.1 or http://localhost for local development only")
     registry_payment_release.add_argument("--payment", required=True)
     registry_payment_release.add_argument("--note", default="")
     registry_payment_release.add_argument("--format", choices=["text", "json"], default="text")
@@ -1130,6 +1293,8 @@ def build_parser() -> argparse.ArgumentParser:
     registry_payment_refund = registry_sub.add_parser("payment-refund", help="Refund a held payment to the buyer")
     registry_payment_refund.add_argument("--url", required=True)
     registry_payment_refund.add_argument("--api-key", default="")
+    registry_payment_refund.add_argument("--confirm", action="store_true", help="Confirm refunding this PSP custody record")
+    registry_payment_refund.add_argument("--allow-insecure-localhost", action="store_true", help="Allow http://127.0.0.1 or http://localhost for local development only")
     registry_payment_refund.add_argument("--payment", required=True)
     registry_payment_refund.add_argument("--note", default="")
     registry_payment_refund.add_argument("--format", choices=["text", "json"], default="text")

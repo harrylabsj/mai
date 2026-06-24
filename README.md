@@ -96,32 +96,35 @@ python3 scripts/mai_registry.py issue-key --data ./mai-registry.json --token buy
 python3 scripts/mai_registry.py serve --data ./mai-registry.json --host 127.0.0.1 --port 8765 --rate-limit-per-minute 60
 ```
 
+Security boundary: remote registry URLs must use HTTPS. The local development examples below use `http://127.0.0.1` and therefore include `--allow-insecure-localhost`. Registry writes require explicit confirmation through `--confirm`; OpenClaw plugin tools use `confirm=true` for the same boundary. `registry push` is catalog-only by default; use `--include-orders` only for a deliberate private migration.
+
 Merchant agent publishes to registry:
 
 ```bash
-python3 scripts/mai.py --data ./seller.json registry push --url http://127.0.0.1:8765 --api-key seller-token
+python3 scripts/mai.py --data ./seller.json registry push --url http://127.0.0.1:8765 --api-key seller-token --confirm --allow-insecure-localhost
 ```
 
 Buyer agent searches and contacts the merchant:
 
 ```bash
-python3 scripts/mai.py --data ./buyer.json registry search-products --url http://127.0.0.1:8765 --query "longjing tea" --format json
-python3 scripts/mai.py --data ./buyer.json registry message --url http://127.0.0.1:8765 --api-key buyer-token --buyer alice --merchant seller-a --sku tea-a --text "Can this ship today?"
-python3 scripts/mai.py --data ./buyer.json registry order --url http://127.0.0.1:8765 --api-key buyer-token --buyer alice --merchant seller-a --sku tea-a --quantity 2 --offer-price 86
-python3 scripts/mai.py --data ./buyer.json registry payment-hold --url http://127.0.0.1:8765 --api-key buyer-token --buyer alice --order ORD-0001
+python3 scripts/mai.py --data ./buyer.json registry search-products --url http://127.0.0.1:8765 --query "longjing tea" --allow-insecure-localhost --format json
+python3 scripts/mai.py --data ./buyer.json registry message --url http://127.0.0.1:8765 --api-key buyer-token --buyer alice --merchant seller-a --sku tea-a --text "Can this ship today?" --confirm --allow-insecure-localhost
+python3 scripts/mai.py --data ./buyer.json registry order --url http://127.0.0.1:8765 --api-key buyer-token --buyer alice --merchant seller-a --sku tea-a --quantity 2 --offer-price 86 --confirm --allow-insecure-localhost
+python3 scripts/mai.py --data ./buyer.json registry payment-hold --url http://127.0.0.1:8765 --api-key buyer-token --buyer alice --order ORD-0001 --confirm --allow-insecure-localhost
 ```
 
 Merchant agent pulls new demand:
 
 ```bash
-python3 scripts/mai.py --data ./seller.json registry pull --url http://127.0.0.1:8765 --api-key seller-token --merchant seller-a
+python3 scripts/mai.py --data ./seller.json registry pull --url http://127.0.0.1:8765 --api-key seller-token --merchant seller-a --preview --confirm --allow-insecure-localhost
+python3 scripts/mai.py --data ./seller.json registry pull --url http://127.0.0.1:8765 --api-key seller-token --merchant seller-a --confirm --allow-insecure-localhost
 ```
 
 Admin releases or refunds held payments after fulfillment or dispute review:
 
 ```bash
-python3 scripts/mai.py --data ./ops.json registry payment-release --url http://127.0.0.1:8765 --api-key admin-token --payment PAY-0001
-python3 scripts/mai.py --data ./ops.json registry payment-refund --url http://127.0.0.1:8765 --api-key admin-token --payment PAY-0001
+python3 scripts/mai.py --data ./ops.json registry payment-release --url http://127.0.0.1:8765 --api-key admin-token --payment PAY-0001 --confirm --allow-insecure-localhost
+python3 scripts/mai.py --data ./ops.json registry payment-refund --url http://127.0.0.1:8765 --api-key admin-token --payment PAY-0001 --confirm --allow-insecure-localhost
 ```
 
 ## Public Marketplace Controls
@@ -129,6 +132,8 @@ python3 scripts/mai.py --data ./ops.json registry payment-refund --url http://12
 The registry includes the minimum controls needed before a public pilot:
 
 - API keys are stored as salted hashes.
+- Remote registry URLs must use HTTPS; localhost HTTP is development-only and must be opted into with `--allow-insecure-localhost`.
+- Registry writes require `--confirm` or plugin `confirm=true`, and `registry push` excludes orders/messages unless `--include-orders` is explicitly supplied.
 - Merchant keys can only push/pull their own merchant scope.
 - Buyer keys can only create buyer-scoped messages, orders, and payment holds.
 - Admin keys are required for moderation decisions and payment release/refund.

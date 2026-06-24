@@ -138,6 +138,10 @@ function registryApiKey(input, config) {
   return nonEmptyString(input.api_key) || nonEmptyString(input.apiKey) || config.apiKey;
 }
 
+function booleanFlag(value) {
+  return value === true || value === 'true' || value === '1' || value === 1;
+}
+
 function withPluginConfig(api, handler) {
   return async (input = {}) => handler(input || {}, resolveMaiPluginConfig(api));
 }
@@ -178,11 +182,29 @@ function addRegistryAuth(args, input, config) {
   if (apiKey) args.push('--api-key', apiKey);
 }
 
+function addRegistryTransportArgs(args, input) {
+  if (booleanFlag(input.allow_insecure_localhost) || booleanFlag(input.allowInsecureLocalhost)) {
+    args.push('--allow-insecure-localhost');
+  }
+}
+
+function requireRegistryWriteConfirmation(input, action) {
+  if (!booleanFlag(input.confirm)) {
+    return {
+      ok: false,
+      errorType: 'validation',
+      error: `confirm=true is required before ${action}. Remote registry writes can publish marketplace, order, message, or payment data.`,
+    };
+  }
+  return { ok: true };
+}
+
 function formatHelp(config) {
   const lines = [
     'Mai Plugin is loaded.',
     'Install the mai skill for workflow policy; this plugin adds native tools for deterministic catalog, order, and registry actions.',
     'Tools: mai_create_merchant, mai_add_product, mai_search_products, mai_compare_products, mai_create_order, mai_registry_search_products, mai_registry_push, mai_registry_order.',
+    'Registry writes require confirm=true. Remote registry URLs must use HTTPS; http://127.0.0.1 and http://localhost require allow_insecure_localhost=true for local development.',
     'Command: /mai search <query> runs a local product search.',
   ];
   if (config.dataPath) lines.push(`dataPath: ${config.dataPath}`);
@@ -351,6 +373,10 @@ export function registerOpenClawPlugin(api) {
         max_price: { type: 'number' },
         city: { type: 'string' },
         include_out_of_stock: { type: 'boolean' },
+        allow_insecure_localhost: {
+          type: 'boolean',
+          description: 'Allow http://127.0.0.1 or http://localhost for local development only.',
+        },
       },
     },
   }, async (input, config) => {
@@ -358,6 +384,7 @@ export function registerOpenClawPlugin(api) {
     if (!required.ok) return required;
     const args = ['registry', 'search-products', '--url', required.url, '--format', 'json'];
     addRegistryAuth(args, input, config);
+    addRegistryTransportArgs(args, input);
     addOptionalArg(args, '--query', input.query);
     addOptionalNumber(args, '--max-price', input.max_price);
     addOptionalArg(args, '--city', input.city);
@@ -367,26 +394,43 @@ export function registerOpenClawPlugin(api) {
 
   registerTool(api, toolSpec(api, {
     name: 'mai_registry_push',
-    description: 'Push the local merchant catalog to a hosted Mai registry using a merchant API key.',
+    description: 'Push the local merchant catalog to a hosted Mai registry using a merchant API key after explicit confirmation.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         registry_url: { type: 'string' },
         api_key: { type: 'string' },
+        confirm: {
+          type: 'boolean',
+          description: 'Must be true to publish local marketplace data to the registry.',
+        },
+        include_orders: {
+          type: 'boolean',
+          description: 'Also publish local orders and messages. Default push is catalog-only.',
+        },
+        allow_insecure_localhost: {
+          type: 'boolean',
+          description: 'Allow http://127.0.0.1 or http://localhost for local development only.',
+        },
       },
     },
   }, async (input, config) => {
+    const confirmed = requireRegistryWriteConfirmation(input, 'pushing local catalog data to a registry');
+    if (!confirmed.ok) return confirmed;
     const required = requireRegistryUrl(input, config);
     if (!required.ok) return required;
     const args = ['registry', 'push', '--url', required.url, '--format', 'json'];
     addRegistryAuth(args, input, config);
+    if (booleanFlag(input.include_orders) || booleanFlag(input.includeOrders)) args.push('--include-orders');
+    args.push('--confirm');
+    addRegistryTransportArgs(args, input);
     return runMaiCli({ subcommandArgs: args, dataPath: config.dataPath, projectRoot: config.projectRoot });
   }));
 
   registerTool(api, toolSpec(api, {
     name: 'mai_registry_order',
-    description: 'Create a draft order in a hosted Mai registry using buyer authorization.',
+    description: 'Create a draft order in a hosted Mai registry using buyer authorization after explicit confirmation.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -399,10 +443,20 @@ export function registerOpenClawPlugin(api) {
         quantity: { type: 'integer' },
         offer_price: { type: 'number' },
         note: { type: 'string' },
+        confirm: {
+          type: 'boolean',
+          description: 'Must be true to create the registry draft order.',
+        },
+        allow_insecure_localhost: {
+          type: 'boolean',
+          description: 'Allow http://127.0.0.1 or http://localhost for local development only.',
+        },
       },
       required: ['buyer', 'merchant', 'sku', 'quantity'],
     },
   }, async (input, config) => {
+    const confirmed = requireRegistryWriteConfirmation(input, 'creating a registry draft order');
+    if (!confirmed.ok) return confirmed;
     const required = requireRegistryUrl(input, config);
     if (!required.ok) return required;
     const args = [
@@ -422,6 +476,8 @@ export function registerOpenClawPlugin(api) {
       'json',
     ];
     addRegistryAuth(args, input, config);
+    args.push('--confirm');
+    addRegistryTransportArgs(args, input);
     addOptionalNumber(args, '--offer-price', input.offer_price);
     addOptionalArg(args, '--note', input.note);
     return runMaiCli({ subcommandArgs: args, dataPath: config.dataPath, projectRoot: config.projectRoot });

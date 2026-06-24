@@ -126,7 +126,15 @@ class PublicMarketplaceTest(unittest.TestCase):
             self.make_seller_catalog(seller_file)
 
             with self.assertRaises(SystemExit):
-                self.run_cli(seller_file, "registry", "push", "--url", base_url)
+                self.run_cli(
+                    seller_file,
+                    "registry",
+                    "push",
+                    "--url",
+                    base_url,
+                    "--confirm",
+                    "--allow-insecure-localhost",
+                )
 
             self.run_cli(
                 seller_file,
@@ -136,6 +144,8 @@ class PublicMarketplaceTest(unittest.TestCase):
                 base_url,
                 "--api-key",
                 "seller-token",
+                "--confirm",
+                "--allow-insecure-localhost",
             )
 
             with self.assertRaises(SystemExit):
@@ -145,6 +155,8 @@ class PublicMarketplaceTest(unittest.TestCase):
                     "message",
                     "--url",
                     base_url,
+                    "--confirm",
+                    "--allow-insecure-localhost",
                     "--buyer",
                     "alice",
                     "--merchant",
@@ -162,6 +174,8 @@ class PublicMarketplaceTest(unittest.TestCase):
                     base_url,
                     "--api-key",
                     "buyer-token",
+                    "--confirm",
+                    "--allow-insecure-localhost",
                     "--buyer",
                     "alice",
                     "--merchant",
@@ -185,6 +199,8 @@ class PublicMarketplaceTest(unittest.TestCase):
                     base_url,
                     "--api-key",
                     "buyer-token",
+                    "--confirm",
+                    "--allow-insecure-localhost",
                     "--buyer",
                     "alice",
                     "--merchant",
@@ -208,6 +224,8 @@ class PublicMarketplaceTest(unittest.TestCase):
                     base_url,
                     "--api-key",
                     "buyer-token",
+                    "--confirm",
+                    "--allow-insecure-localhost",
                     "--buyer",
                     "alice",
                     "--order",
@@ -228,6 +246,8 @@ class PublicMarketplaceTest(unittest.TestCase):
                     base_url,
                     "--api-key",
                     "buyer-token",
+                    "--confirm",
+                    "--allow-insecure-localhost",
                     "--payment",
                     payment["payment"]["id"],
                 )
@@ -241,6 +261,8 @@ class PublicMarketplaceTest(unittest.TestCase):
                     base_url,
                     "--api-key",
                     "admin-token",
+                    "--confirm",
+                    "--allow-insecure-localhost",
                     "--payment",
                     payment["payment"]["id"],
                     "--format",
@@ -273,6 +295,8 @@ class PublicMarketplaceTest(unittest.TestCase):
                 base_url,
                 "--api-key",
                 "seller-token",
+                "--confirm",
+                "--allow-insecure-localhost",
             )
 
             clean_search = json.loads(
@@ -282,6 +306,7 @@ class PublicMarketplaceTest(unittest.TestCase):
                     "search-products",
                     "--url",
                     base_url,
+                    "--allow-insecure-localhost",
                     "--query",
                     "fake id",
                     "--format",
@@ -310,6 +335,7 @@ class PublicMarketplaceTest(unittest.TestCase):
                     "search-products",
                     "--url",
                     base_url,
+                    "--allow-insecure-localhost",
                     "--query",
                     "fake id",
                     "--format",

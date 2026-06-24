@@ -36,7 +36,7 @@ def load_mai_module():
 mai = load_mai_module()
 
 
-VERSION = "1.1.2"
+VERSION = "1.1.4"
 RISK_TERMS = {
     "fake id",
     "counterfeit",

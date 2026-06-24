@@ -1,6 +1,6 @@
 ---
 name: mai
-version: 1.1.3
+version: 1.1.4
 description: "AI shopping matchmaking agent for OpenClaw and Hermes. Use when merchants want to publish products, manage stock, answer buyer questions, and handle order requests; or when buyers want to discover merchants and products, compare prices, discuss with sellers, read reviews, and create trackable orders. Supports local-first transaction tracking and registry-backed PSP custody records."
 ---
 
@@ -114,25 +114,28 @@ python3 scripts/mai_registry.py issue-key --data ./mai-registry.json --token buy
 python3 scripts/mai_registry.py serve --data ./mai-registry.json --host 127.0.0.1 --port 8765 --rate-limit-per-minute 60
 ```
 
+Security boundary: remote registry URLs must use HTTPS. The local examples below use `http://127.0.0.1` and therefore include `--allow-insecure-localhost`. Registry writes require explicit current-turn confirmation through `--confirm`; OpenClaw plugin tools use `confirm=true` for the same boundary. `registry push` publishes catalog data by default and excludes orders/messages unless `--include-orders` is deliberately supplied.
+
 Merchant agents publish local supply:
 
 ```bash
-python3 scripts/mai.py --data ./seller.json registry push --url http://127.0.0.1:8765 --api-key seller-token
+python3 scripts/mai.py --data ./seller.json registry push --url http://127.0.0.1:8765 --api-key seller-token --confirm --allow-insecure-localhost
 ```
 
 Buyer agents discover supply and create demand:
 
 ```bash
-python3 scripts/mai.py --data ./buyer.json registry search-products --url http://127.0.0.1:8765 --query "longjing tea" --format json
-python3 scripts/mai.py --data ./buyer.json registry message --url http://127.0.0.1:8765 --api-key buyer-token --buyer alice --merchant seller-a --sku tea-a --text "Can this ship today?"
-python3 scripts/mai.py --data ./buyer.json registry order --url http://127.0.0.1:8765 --api-key buyer-token --buyer alice --merchant seller-a --sku tea-a --quantity 2 --offer-price 86
-python3 scripts/mai.py --data ./buyer.json registry payment-hold --url http://127.0.0.1:8765 --api-key buyer-token --buyer alice --order ORD-0001
+python3 scripts/mai.py --data ./buyer.json registry search-products --url http://127.0.0.1:8765 --query "longjing tea" --allow-insecure-localhost --format json
+python3 scripts/mai.py --data ./buyer.json registry message --url http://127.0.0.1:8765 --api-key buyer-token --buyer alice --merchant seller-a --sku tea-a --text "Can this ship today?" --confirm --allow-insecure-localhost
+python3 scripts/mai.py --data ./buyer.json registry order --url http://127.0.0.1:8765 --api-key buyer-token --buyer alice --merchant seller-a --sku tea-a --quantity 2 --offer-price 86 --confirm --allow-insecure-localhost
+python3 scripts/mai.py --data ./buyer.json registry payment-hold --url http://127.0.0.1:8765 --api-key buyer-token --buyer alice --order ORD-0001 --confirm --allow-insecure-localhost
 ```
 
 Merchant agents pull buyer messages and draft orders:
 
 ```bash
-python3 scripts/mai.py --data ./seller.json registry pull --url http://127.0.0.1:8765 --api-key seller-token --merchant seller-a
+python3 scripts/mai.py --data ./seller.json registry pull --url http://127.0.0.1:8765 --api-key seller-token --merchant seller-a --preview --confirm --allow-insecure-localhost
+python3 scripts/mai.py --data ./seller.json registry pull --url http://127.0.0.1:8765 --api-key seller-token --merchant seller-a --confirm --allow-insecure-localhost
 ```
 
 Read `references/registry-api.md` before changing registry integrations.
@@ -141,6 +144,9 @@ Read `references/registry-api.md` before changing registry integrations.
 
 - Require API keys for merchant push/pull, buyer messages/orders/payment holds, moderation, and payment release/refund.
 - Store only salted API key hashes in the registry file.
+- Require HTTPS for remote registries. Only `http://127.0.0.1` or `http://localhost` may use `--allow-insecure-localhost` during local development.
+- Require explicit confirmation for registry writes: CLI `--confirm` or OpenClaw plugin `confirm=true`.
+- Keep `registry push` catalog-only by default; use `--include-orders` only after reviewing the destination and migration intent.
 - Allow public search, but rate-limit every request by API key or client IP.
 - Treat products with high risk scores as `pending_review`; do not show them in search until an admin approves them.
 - Use `registry payment-hold` only as PSP-backed custody tracking. The bundled `demo` provider is not real money movement.
